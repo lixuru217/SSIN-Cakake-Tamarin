@@ -1,52 +1,76 @@
-# SSIN-Cahake Core Extended Tamarin Model
+# ssin_cahake_core_extended.spthy README
 
 ## Scope
 
-This artifact models the instantiated SSIN-Cahake core handshake under Sections VI-C and VI-D of `cakake-2nd.pdf`:
+This artifact describes `ssin_cahake_core_extended.spthy`, the extended instantiated
+SSIN-Cahake core model for Sections VI-C (Pre-Authentication) and VI-D (Mutual
+Authentication and Key Exchange) of `cakake-2nd.pdf`.
 
-- `Pre-Authentication`
-- `Mutual Authentication and Key Exchange`
+The model is a Priority-1 extended variant of `ssin_cahake_core.spthy` and includes
+the same protocol core with additional end-to-end checks focused on replay and
+key-confidentiality consistency.
 
-`ssin_cahake_core_extended.spthy` is the Priority-1 extended instantiation of the core model and adds replay / mutual-auth coverage beyond the baseline core file.
+## Model focus
 
-## What this extended model adds
+`ssin_cahake_core_extended.spthy` targets:
 
-Compared with `ssin_cahake_core.spthy`, the extended model includes the same protocol core and additionally proves:
+- The public-channel VI-C/VI-D handshake flow of Section VI.
+- Trace properties under no-compromise assumptions.
+- Extended protocol properties beyond the baseline core artifact.
+
+## Added proof objectives in the extended model
+
+Compared with `ssin_cahake_core.spthy`, the extended file includes these additional
+lemma objectives:
 
 - `no_replay_uei_accept_core`
 - `mutual_auth_consistent_core`
 - `full_session_agree_uei_core`
 - `no_key_splitting`
 
-## Out-of-scope (this artifact)
+## What this artifact does not prove
 
-- Section VI-E batch verification
-- KCI / compromise-oracle claims from Section VII
-- Theorem-5 style claims
-- Full session-identifier or CK-theorem reconstruction proofs
-- PFS under explicit Reveal/StateReveal oracle conditions
+- Section VI-E batch verification.
+- KCI / compromise-oracle proofs (covered in `ssin_cahake_compromise.spthy`).
+- Theorem-5 style claims.
+- PFS under explicit Reveal/StateReveal queries.
+- Full computational CK-derived theorem statements.
+
+## Main assumptions carried into the model
+
+- `TS1`–`TS6` are modeled as fresh symbolic values.
+- `CheckTS4`, `CheckTS5`, `CheckTS6` are action/instrumentation facts only.
+- Replay resistance for SB/UEi accept is represented via freshness structure
+  (`~TS5`, `~TS6`) and protocol ordering.
+- UEi is assumed to know SB domain/context and public key to initiate pre-auth.
+- `CacheUEi` is a passive trace annotation in this model.
 
 ## Reproducibility
 
-Run from the `tamarin/` directory:
+Run from `tamarin/`:
 
 ```sh
 ./run_ssin_extended_proofs.sh
 ```
 
-This executes parser, well-formedness, and dedicated lemma proofs for the extended core model, writing results to `ssin_extended_proof_logs/`.
+The script writes logs to `ssin_extended_proof_logs/` and runs parse, precompute,
+and lemma-by-lemma proof commands for:
 
-## What is proven in this artifact (current package)
+- `ssin_cahake_core_extended.spthy`
+- `executability_ssin_core`
+- `session_key_secrecy_sb_core`
+- `session_key_secrecy_uei_core`
+- `agreement_sb_on_uei_core`
+- `agreement_uei_on_sb_core`
+- `no_replay_sb_accept_core`
+- `no_inconsistent_acceptance_core`
+- `no_replay_uei_accept_core`
+- `mutual_auth_consistent_core`
+- `full_session_agree_uei_core`
+- `no_key_splitting`
 
-The extended run validates core protocol behavior plus the additional Priority-1 lemmas listed above in the same VI-C/VI-D instantiation assumptions as the baseline core model.
+## Artifact usage guidance
 
-## Protocol/Model assumptions to keep in mind
-
-- `TS5` and `TS6` replay resistance is provided through fresh-value modeling of timestamps.
-- `CheckTS4`, `CheckTS5`, and `CheckTS6` are action/instrumentation annotations.
-- UEi is assumed to know SB domain/public key context required to start pre-authentication.
-- `CacheUEi` is a passive trace annotation and is not used as a cryptographic check.
-
-## Suggested wording
-
-> `ssin_cahake_core_extended.spthy` provides an extended priority-1 instantiation proof artifact for Sections VI-C and VI-D of the SSIN-Cahake model. In addition to the baseline core checks, it includes replay, mutual-auth consistency, full-session agree-side, and key-splitting safety coverage.
+Use this README as the companion documentation for `ssin_cahake_core_extended.spthy`.
+For the baseline model documentation, use `ssin_cahake_core_README.md`.
+For compromise-aware coverage, use `ssin_cahake_compromise_README.md`.
