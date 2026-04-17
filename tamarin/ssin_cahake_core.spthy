@@ -1,0 +1,182 @@
+theory ssin_cahake_core
+begin
+
+builtins: diffie-hellman, asymmetric-encryption
+
+functions:
+  hid/3,
+  pid_user/2,
+  pid_sa/2,
+  pid_sb/2,
+  v1tag/6,
+  v2tag/6,
+  skdf/7
+
+/* Milestone-2 scope:
+ * - target only the instantiated SSIN-Cahake core handshake from Sections VI-C and VI-D
+ * - abstract VI-A / VI-B as long-term key and identity-hash initialization
+ * - keep SA protocol-following / passive within the modeled scope
+ * - leave VI-E batch verification out of scope
+ * - model TS1-TS6 as fresh values rather than wall-clock timestamps
+ * - collapse the CLC key material PKi = (pki, Pi), SKi, and hi = H1(IDi, Di, pki, Pi)
+ *   into symbolic long-term-key and identity-hash facts
+ * - abstract the Section VI-D recoverability checks M'_i = Qi · SKB = Mi
+ *   and M'_B = QB · SKi = MB as asymmetric-encryption-style recoverability
+ *   under the peer's long-term secret key; the extracted VI-D Step 1 prose does
+ *   not spell out a closed-form Qi equation, so recoverability is the paper anchor
+ */
+
+rule InitEntity:
+  [ Fr(~ltk) ]
+  --[ InitEntity($A, $D) ]->
+  [ !Ltk($A, ~ltk),
+    !Pk($A, pk(~ltk)),
+    !Hi($A, $D, hid($A, $D, pk(~ltk))),
+    Out(<$A, $D, pk(~ltk), hid($A, $D, pk(~ltk))>) ]
+
+rule UEi_PreAuth_1:
+  let Mi = 'g'^~mIsec
+      hi = hid($UEi, $Di, pkUEi)
+      PIDi = pid_user($UEi, Mi)
+  in
+  [ Fr(~mIsec),
+    Fr(~TS1),
+    !Ltk($UEi, ltkUEi),
+    !Pk($UEi, pkUEi),
+    !Pk($SB, pkSB),
+    !Hi($UEi, $Di, hi) ]
+  --[ Neq($UEi, $SB),
+      Neq($UEi, 'SA'),
+      Neq($SB, 'SA'),
+      SentN1($UEi, 'SA', hi, Mi, PIDi, ~TS1) ]->
+  [ StUEi_PreAuth($UEi, $Di, $SB, $DB, ltkUEi, pkSB, hi, ~mIsec, Mi),
+    SA_InN1($UEi, $Di, $SB, $DB, hi, Mi, PIDi, ~TS1) ]
+
+rule SA_PreAuth_2:
+  let PIDA = pid_sa('SA', Mi)
+  in
+  [ Fr(~TS2),
+    SA_InN1(UEi, Di, SB, DB, hi, Mi, PIDi, TS1) ]
+  --[ SentN2('SA', SB, hi, Mi, PIDA, PIDi, ~TS2) ]->
+  [ SB_InN2(UEi, Di, SB, DB, hi, Mi, PIDA, PIDi, ~TS2) ]
+
+rule SB_PreAuth_3:
+  let MB = 'g'^~mBsec
+      hB = hid($SB, $DB, pkSB)
+      PIDB = pid_sb($SB, MB)
+  in
+  [ Fr(~mBsec),
+    Fr(~TS3),
+    !Ltk($SB, ltkSB),
+    !Pk($SB, pkSB),
+    !Pk($UEi, pkUEi),
+    !Hi($SB, $DB, hB),
+    SB_InN2($UEi, $Di, $SB, $DB, hi, Mi, PIDA, PIDi, TS2) ]
+  --[ SentN3($SB, 'SA', hB, MB, PIDA, PIDB, ~TS3) ]->
+  [ StSB_Public($SB, $DB, $UEi, $Di, ltkSB, pkUEi, hi, hB, Mi, ~mBsec, MB),
+    SA_InN3($UEi, $Di, $SB, $DB, hB, MB, PIDA, PIDB, ~TS3) ]
+
+rule SA_PreAuth_4:
+  [ Fr(~TS4),
+    SA_InN3(UEi, Di, SB, DB, hB, MB, PIDA, PIDB, TS3) ]
+  --[ SentN4('SA', UEi, hB, MB, PIDA, PIDB, ~TS4) ]->
+  [ UEi_InN4(UEi, Di, SB, DB, hB, MB, PIDA, PIDB, ~TS4) ]
+
+rule UEi_Public_Send:
+  let Qi = aenc(Mi, pkSB)
+      Kshared = MB^mIsec
+      V1 = v1tag($UEi, $SB, Mi, MB, Kshared, ~TS5)
+  in
+  [ Fr(~TS5),
+    StUEi_PreAuth($UEi, $Di, $SB, $DB, ltkUEi, pkSB, hi, mIsec, Mi),
+    UEi_InN4($UEi, $Di, $SB, $DB, hB, MB, PIDA, PIDB, TS4) ]
+  --[ CheckTS4($UEi, $SB, TS4),
+      FreshTS5(~TS5),
+      SentPublic1($UEi, $SB, Qi, V1, ~TS5),
+      CacheUEi($UEi, $SB, hi, hB, Mi, MB) ]->
+  [ StUEi_Public($UEi, $Di, $SB, $DB, ltkUEi, mIsec, hi, hB, Mi, MB, Qi, V1, ~TS5),
+    Out(<$UEi, $SB, Qi, V1, ~TS5>) ]
+
+rule SB_Public_Recv_Send:
+  let MiCheck = adec(Qi, ltkSB)
+      QB = aenc(MB, pkUEi)
+      Kshared = Mi^mBsec
+      V2 = v2tag(UEi, SB, Mi, MB, Kshared, ~TS6)
+      SKiB = skdf(Kshared, UEi, Di, SB, DB, TS5, ~TS6)
+  in
+  [ Fr(~TS6),
+    StSB_Public(SB, DB, UEi, Di, ltkSB, pkUEi, hi, hB, Mi, mBsec, MB),
+    In(<UEi, SB, Qi, V1, TS5>) ]
+  --[ Eq(MiCheck, Mi),
+      Eq(V1, v1tag(UEi, SB, Mi, MB, Kshared, TS5)),
+      CheckTS5(SB, UEi, TS5),
+      VerifiedV1AtSB(SB, UEi, Qi, V1, TS5),
+      FreshTS6(~TS6),
+      SentPublic2(SB, UEi, QB, V2, ~TS6),
+      DeriveSB(SB, UEi, Kshared, SKiB),
+      AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, ~TS6) ]->
+  [ Out(<SB, UEi, QB, V2, ~TS6>) ]
+
+rule UEi_Public_Recv_Accept:
+  let MBCheck = adec(QB, ltkUEi)
+      Kshared = MB^mIsec
+      SKiB = skdf(Kshared, UEi, Di, SB, DB, TS5, TS6)
+  in
+  [ StUEi_Public(UEi, Di, SB, DB, ltkUEi, mIsec, hi, hB, Mi, MB, Qi, V1, TS5),
+    In(<SB, UEi, QB, V2, TS6>) ]
+  --[ Eq(MBCheck, MB),
+      Eq(V2, v2tag(UEi, SB, Mi, MB, Kshared, TS6)),
+      CheckTS6(UEi, SB, TS6),
+      VerifiedV2AtUEi(UEi, SB, QB, V2, TS6),
+      DeriveUEi(UEi, SB, Kshared, SKiB),
+      AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) ]->
+  [ ]
+
+restriction Equality:
+  "All x y #i. Eq(x, y) @ i ==> x = y"
+
+restriction Inequality:
+  "All x #i. Neq(x, x) @ i ==> F"
+
+restriction UniqueInit:
+  "All A D1 D2 #i #j. InitEntity(A, D1) @ i & InitEntity(A, D2) @ j ==> #i = #j & D1 = D2"
+
+lemma executability_ssin_core:
+  exists-trace
+  "Ex UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j.
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ j"
+
+lemma session_key_secrecy_sb_core:
+  "All SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i
+     ==> not (Ex #j. K(SKiB) @ j)"
+
+lemma session_key_secrecy_uei_core:
+  "All UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i
+     ==> not (Ex #j. K(SKiB) @ j)"
+
+lemma agreement_sb_on_uei_core:
+  "All SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i
+     ==> Ex Z #j. SentPublic1(UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z, TS5), TS5) @ j & j < i"
+
+lemma agreement_uei_on_sb_core:
+  "All UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i
+     ==> Ex Z #j. SentPublic2(SB, UEi, QB, v2tag(UEi, SB, Mi, MB, Z, TS6), TS6) @ j & j < i"
+
+lemma no_replay_sb_accept_core:
+  "All SB UEi SKiB Mi MB Qi QB TS5 TS6 #i #j.
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ j
+     ==> #i = #j"
+
+lemma no_inconsistent_acceptance_core:
+  "All UEi SB SK1 SK2 Mi MB Qi QB TS5 TS6 #i #j.
+     AcceptUEi(UEi, SB, SK1, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     AcceptSB(SB, UEi, SK2, Mi, MB, Qi, QB, TS5, TS6) @ j
+     ==> SK1 = SK2"
+
+end

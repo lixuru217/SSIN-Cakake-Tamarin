@@ -1,0 +1,230 @@
+maude tool: '/usr/local/Cellar/maude/2.7.1_1/bin/maude'
+ checking version: 2.7.1. OK.
+ checking installation: OK.
+diffLemma
+[Theory ssin_cahake_privacy] Theory loaded
+[Theory ssin_cahake_privacy] Theory translated
+[Theory ssin_cahake_privacy] Theory closed
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Saturating Sources] Done
+theory ssin_cahake_privacy
+
+begin
+
+// Function signature and definition of the equational theory E
+
+builtins: diffie-hellman
+functions: adec/2, aenc/2, fst/1, pair/2, pk/1, snd/1, v1anon/4, v2anon/4
+equations:
+    adec(aenc(x.1, pk(x.2)), x.2) = x.1,
+    fst(<x.1, x.2>) = x.1,
+    snd(<x.1, x.2>) = x.2
+
+rule (modulo E) Init_SB:
+   [ Fr( ~ltkSB ) ]
+  --[ InitSB( $SB ) ]->
+   [ !LtkSB( $SB, ~ltkSB ), !PkSB( $SB, pk(~ltkSB) ), Out( pk(~ltkSB) ) ]
+
+restriction UniqueInitSB [right]:
+  "∀ SB #i #j. ((InitSB( SB ) @ #i) ∧ (InitSB( SB ) @ #j)) ⇒ (#i = #j)"
+  // safety formula
+
+restriction UniqueInitSB [left]:
+  "∀ SB #i #j. ((InitSB( SB ) @ #i) ∧ (InitSB( SB ) @ #j)) ⇒ (#i = #j)"
+  // safety formula
+
+rule (modulo E) Init_User:
+   [ Fr( ~ltkL ), Fr( ~ltkR ) ]
+  --[ InitUser( diff($UEiL, $UEiR) ) ]->
+   [
+   !LtkUser( diff($UEiL, $UEiR), diff(~ltkL, ~ltkR) ),
+   !PkUser( diff($UEiL, $UEiR), diff(pk(~ltkL), pk(~ltkR)) ),
+   Out( diff(pk(~ltkL), pk(~ltkR)) )
+   ]
+
+restriction UniqueInitUser [right]:
+  "∀ user #i #j.
+    ((InitUser( user ) @ #i) ∧ (InitUser( user ) @ #j)) ⇒ (#i = #j)"
+  // safety formula
+
+restriction UniqueInitUser [left]:
+  "∀ user #i #j.
+    ((InitUser( user ) @ #i) ∧ (InitUser( user ) @ #j)) ⇒ (#i = #j)"
+  // safety formula
+
+rule (modulo E) PreAuth_Setup:
+   [
+   Fr( ~mIsec ), Fr( ~mBsec ), !LtkUser( user, ltku ), !PkUser( user, pku ),
+   !PkSB( $SB, pkSB )
+   ]
+  --[ PreAuthSetup( user, $SB, 'g'^~mIsec, 'g'^~mBsec ) ]->
+   [
+   StUEi_Public( user, ltku, $SB, pkSB, ~mIsec, 'g'^~mIsec, 'g'^~mBsec ),
+   StSB_Public( $SB, user, pku, 'g'^~mIsec, ~mBsec, 'g'^~mBsec )
+   ]
+
+rule (modulo E) UEi_Public_Send:
+   [ Fr( ~TS5 ), StUEi_Public( user, ltku, $SB, pkSB, mIsec, Mi, MB ) ]
+  --[
+  PublicSend( user, $SB, aenc(Mi, pkSB), v1anon(Mi, MB, MB^mIsec, ~TS5),
+              ~TS5
+  )
+  ]->
+   [
+   StUEi_Wait( user, ltku, $SB, mIsec, Mi, MB, ~TS5 ),
+   Out( <aenc(Mi, pkSB), v1anon(Mi, MB, MB^mIsec, ~TS5), ~TS5> )
+   ]
+
+rule (modulo E) SB_Public_Recv_Send:
+   [
+   Fr( ~TS6 ), !LtkSB( $SB, ltkSB ),
+   StSB_Public( $SB, user, pku, Mi, mBsec, MB ), In( <Qi, V1, TS5> )
+   ]
+  --[
+  Eq( adec(Qi, ltkSB), Mi ),
+  Eq( V1, v1anon(Mi, MB, adec(Qi, ltkSB)^mBsec, TS5) ),
+  SBAccept( $SB, user, Mi, MB, adec(Qi, ltkSB)^mBsec )
+  ]->
+   [
+   Out( <aenc(MB, pku), 
+         v2anon(adec(Qi, ltkSB), MB, adec(Qi, ltkSB)^mBsec, ~TS6), ~TS6>
+   )
+   ]
+
+rule (modulo E) UEi_Public_Recv:
+   [ StUEi_Wait( user, ltku, $SB, mIsec, Mi, MB, TS5 ), In( <QB, V2, TS6> )
+   ]
+  --[
+  Eq( adec(QB, ltku), MB ),
+  Eq( V2, v2anon(Mi, adec(QB, ltku), adec(QB, ltku)^mIsec, TS6) ),
+  UEiAccept( user, $SB, Mi, MB, adec(QB, ltku)^mIsec )
+  ]->
+   [ ]
+
+restriction Equality [right]:
+  "∀ x y #i. (Eq( x, y ) @ #i) ⇒ (x = y)"
+  // safety formula
+
+restriction Equality [left]:
+  "∀ x y #i. (Eq( x, y ) @ #i) ⇒ (x = y)"
+  // safety formula
+
+lemma privacy_executability [right]:
+  exists-trace
+  "∃ user SB Mi MB K #i #j.
+    (SBAccept( SB, user, Mi, MB, K ) @ #i) ∧
+    (UEiAccept( user, SB, Mi, MB, K ) @ #j)"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ user SB Mi MB K #i #j.
+  (SBAccept( SB, user, Mi, MB, K ) @ #i) ∧
+  (UEiAccept( user, SB, Mi, MB, K ) @ #j)"
+*/
+simplify
+solve( !LtkSB( $SB, ltkSB ) ▶₁ #i )
+  case Init_SB
+  solve( StSB_Public( $SB, user, pku, Mi, mBsec, MB ) ▶₂ #i )
+    case PreAuth_Setup
+    solve( StUEi_Wait( $UEiR, ltku, $SB, ~mIsec, 'g'^~mIsec, 'g'^~mBsec,
+                       TS5.1
+           ) ▶₀ #j )
+      case UEi_Public_Send
+      solve( !KU( v1anon('g'^~mIsec, 'g'^~mBsec, 'g'^(~mBsec*~mIsec), TS5)
+             ) @ #vk.3 )
+        case UEi_Public_Send
+        solve( !KU( v2anon('g'^~mIsec, 'g'^~mBsec, 'g'^(~mBsec*~mIsec), TS6.1)
+               ) @ #vk.8 )
+          case SB_Public_Recv_Send
+          solve( !KU( ~TS5 ) @ #vk.5 )
+            case UEi_Public_Send
+            solve( !KU( ~TS6 ) @ #vk.9 )
+              case SB_Public_Recv_Send
+              solve( !KU( aenc('g'^~mIsec, pk(~ltkSB)) ) @ #vk.8 )
+                case UEi_Public_Send
+                solve( !KU( aenc('g'^~mBsec, pk(~ltkR)) ) @ #vk.9 )
+                  case SB_Public_Recv_Send
+                  SOLVED // trace found
+                qed
+              qed
+            qed
+          qed
+        qed
+      qed
+    qed
+  qed
+qed
+
+lemma privacy_executability [left]:
+  exists-trace
+  "∃ user SB Mi MB K #i #j.
+    (SBAccept( SB, user, Mi, MB, K ) @ #i) ∧
+    (UEiAccept( user, SB, Mi, MB, K ) @ #j)"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ user SB Mi MB K #i #j.
+  (SBAccept( SB, user, Mi, MB, K ) @ #i) ∧
+  (UEiAccept( user, SB, Mi, MB, K ) @ #j)"
+*/
+simplify
+solve( !LtkSB( $SB, ltkSB ) ▶₁ #i )
+  case Init_SB
+  solve( StSB_Public( $SB, user, pku, Mi, mBsec, MB ) ▶₂ #i )
+    case PreAuth_Setup
+    solve( StUEi_Wait( $UEiL, ltku, $SB, ~mIsec, 'g'^~mIsec, 'g'^~mBsec,
+                       TS5.1
+           ) ▶₀ #j )
+      case UEi_Public_Send
+      solve( !KU( v1anon('g'^~mIsec, 'g'^~mBsec, 'g'^(~mBsec*~mIsec), TS5)
+             ) @ #vk.3 )
+        case UEi_Public_Send
+        solve( !KU( v2anon('g'^~mIsec, 'g'^~mBsec, 'g'^(~mBsec*~mIsec), TS6.1)
+               ) @ #vk.8 )
+          case SB_Public_Recv_Send
+          solve( !KU( ~TS5 ) @ #vk.5 )
+            case UEi_Public_Send
+            solve( !KU( ~TS6 ) @ #vk.9 )
+              case SB_Public_Recv_Send
+              solve( !KU( aenc('g'^~mIsec, pk(~ltkSB)) ) @ #vk.8 )
+                case UEi_Public_Send
+                solve( !KU( aenc('g'^~mBsec, pk(~ltkL)) ) @ #vk.9 )
+                  case SB_Public_Recv_Send
+                  SOLVED // trace found
+                qed
+              qed
+            qed
+          qed
+        qed
+      qed
+    qed
+  qed
+qed
+
+diffLemma Observational_equivalence:
+by sorry
+
+/* All wellformedness checks were successful. */
+
+/*
+Generated from:
+Tamarin version 1.12.0
+Maude version 2.7.1
+Git revision: UNKNOWN, branch: UNKNOWN
+Compiled at: 2026-04-05 15:24:50.862807 UTC
+*/
+
+end
+
+==============================================================================
+summary of summaries:
+
+analyzed: /Users/lixuru/Documents/Stu_codes/Cakake-Tamarin_new/tamarin/ssin_cahake_privacy.spthy
+
+  processing time: 8.00s
+  
+  RHS :  privacy_executability (exists-trace): verified (11 steps)
+  LHS :  privacy_executability (exists-trace): verified (11 steps)
+  DiffLemma:  Observational_equivalence : analysis incomplete (1 steps)
+
+==============================================================================

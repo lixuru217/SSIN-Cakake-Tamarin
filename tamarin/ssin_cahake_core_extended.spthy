@@ -1,0 +1,391 @@
+theory ssin_cahake_core_extended
+begin
+
+/*
+ * Priority-1 extended trace model for the instantiated SSIN-Cahake core.
+ *
+ * Scope
+ * -----
+ *   Section VI-C Pre-Authentication and Section VI-D Mutual Authentication
+ *   and Key Exchange of cakake-2nd.pdf.
+ *
+ * Relationship to baseline
+ * ------------------------
+ *   This file contains all rules and restrictions from ssin_cahake_core.spthy
+ *   unchanged, plus two additional lemmas:
+ *     • no_replay_uei_accept_core   — UEi-side replay resistance (mirrors the
+ *                                     SB-side lemma already in the baseline).
+ *     • mutual_auth_consistent_core — bidirectional agreement: when both
+ *                                     AcceptSB and AcceptUEi fire on the same
+ *                                     session tuple, each acceptance is preceded
+ *                                     by an honest send from the respective peer.
+ *
+ * The two new lemmas strengthen the mutual-authentication claim and close the
+ * UEi-side replay gap identified in the Milestone-2 extension plan.
+ *
+ * All existing baseline disclosures carry over without change:
+ *   • CheckTS4/5/6 are instrumentation annotations only; no restriction enforced.
+ *   • Replay resistance for SB acceptance derives from Tamarin fresh-value
+ *     uniqueness of ~TS5.  For UEi acceptance it derives from uniqueness of ~TS6.
+ *   • UEi is assumed to know SB's domain label DB and public key pkSB before
+ *     the protocol starts.
+ *   • CacheUEi is a passive trace annotation only.
+ *   • The model does not include Corrupt, Reveal, StateReveal, or Test oracles.
+ *     Secrecy and authentication claims hold only in the absence of long-term-key
+ *     or ephemeral-key compromise.
+ *
+ * Out of scope (same as baseline)
+ * --------------------------------
+ *   • Section VI-E batch verification
+ *   • KCI / compromise-game coverage (see ssin_cahake_compromise.spthy)
+ *   • Privacy / anonymity / unlinkability (see ssin_cahake_privacy_equiv.spthy)
+ */
+
+builtins: diffie-hellman, asymmetric-encryption
+
+functions:
+  hid/3,
+  pid_user/2,
+  pid_sa/2,
+  pid_sb/2,
+  v1tag/6,
+  v2tag/6,
+  skdf/7
+
+/* =========================================================================
+   Long-term-key and identity initialisation  (abstracts VI-A / VI-B)
+   ========================================================================= */
+
+rule InitEntity:
+  [ Fr(~ltk) ]
+  --[ InitEntity($A, $D) ]->
+  [ !Ltk($A, ~ltk),
+    !Pk($A, pk(~ltk)),
+    !Hi($A, $D, hid($A, $D, pk(~ltk))),
+    Out(<$A, $D, pk(~ltk), hid($A, $D, pk(~ltk))>) ]
+
+/* =========================================================================
+   Section VI-C — Pre-Authentication (idealized AEAD tunnels)
+   ========================================================================= */
+
+rule UEi_PreAuth_1:
+  let Mi = 'g'^~mIsec
+      hi = hid($UEi, $Di, pkUEi)
+      PIDi = pid_user($UEi, Mi)
+  in
+  [ Fr(~mIsec),
+    Fr(~TS1),
+    !Ltk($UEi, ltkUEi),
+    !Pk($UEi, pkUEi),
+    !Pk($SB, pkSB),
+    !Hi($UEi, $Di, hi) ]
+  --[ Neq($UEi, $SB),
+      Neq($UEi, 'SA'),
+      Neq($SB, 'SA'),
+      SentN1($UEi, 'SA', hi, Mi, PIDi, ~TS1) ]->
+  [ StUEi_PreAuth($UEi, $Di, $SB, $DB, ltkUEi, pkSB, hi, ~mIsec, Mi),
+    SA_InN1($UEi, $Di, $SB, $DB, hi, Mi, PIDi, ~TS1) ]
+
+rule SA_PreAuth_2:
+  let PIDA = pid_sa('SA', Mi)
+  in
+  [ Fr(~TS2),
+    SA_InN1(UEi, Di, SB, DB, hi, Mi, PIDi, TS1) ]
+  --[ SentN2('SA', SB, hi, Mi, PIDA, PIDi, ~TS2) ]->
+  [ SB_InN2(UEi, Di, SB, DB, hi, Mi, PIDA, PIDi, ~TS2) ]
+
+rule SB_PreAuth_3:
+  let MB = 'g'^~mBsec
+      hB = hid($SB, $DB, pkSB)
+      PIDB = pid_sb($SB, MB)
+  in
+  [ Fr(~mBsec),
+    Fr(~TS3),
+    !Ltk($SB, ltkSB),
+    !Pk($SB, pkSB),
+    !Pk($UEi, pkUEi),
+    !Hi($SB, $DB, hB),
+    SB_InN2($UEi, $Di, $SB, $DB, hi, Mi, PIDA, PIDi, TS2) ]
+  --[ SentN3($SB, 'SA', hB, MB, PIDA, PIDB, ~TS3) ]->
+  [ StSB_Public($SB, $DB, $UEi, $Di, ltkSB, pkUEi, hi, hB, Mi, ~mBsec, MB),
+    SA_InN3($UEi, $Di, $SB, $DB, hB, MB, PIDA, PIDB, ~TS3) ]
+
+rule SA_PreAuth_4:
+  [ Fr(~TS4),
+    SA_InN3(UEi, Di, SB, DB, hB, MB, PIDA, PIDB, TS3) ]
+  --[ SentN4('SA', UEi, hB, MB, PIDA, PIDB, ~TS4) ]->
+  [ UEi_InN4(UEi, Di, SB, DB, hB, MB, PIDA, PIDB, ~TS4) ]
+
+/* =========================================================================
+   Section VI-D — Public Authentication and Key Exchange
+   ========================================================================= */
+
+rule UEi_Public_Send:
+  let Qi = aenc(Mi, pkSB)
+      Kshared = MB^mIsec
+      V1 = v1tag($UEi, $SB, Mi, MB, Kshared, ~TS5)
+  in
+  [ Fr(~TS5),
+    StUEi_PreAuth($UEi, $Di, $SB, $DB, ltkUEi, pkSB, hi, mIsec, Mi),
+    UEi_InN4($UEi, $Di, $SB, $DB, hB, MB, PIDA, PIDB, TS4) ]
+  --[ CheckTS4($UEi, $SB, TS4),
+      FreshTS5(~TS5),
+      SentPublic1($UEi, $SB, Qi, V1, ~TS5),
+      CacheUEi($UEi, $SB, hi, hB, Mi, MB) ]->
+  [ StUEi_Public($UEi, $Di, $SB, $DB, ltkUEi, mIsec, hi, hB, Mi, MB, Qi, V1, ~TS5),
+    Out(<$UEi, $SB, Qi, V1, ~TS5>) ]
+
+rule SB_Public_Recv_Send:
+  let MiCheck = adec(Qi, ltkSB)
+      QB = aenc(MB, pkUEi)
+      Kshared = Mi^mBsec
+      V2 = v2tag(UEi, SB, Mi, MB, Kshared, ~TS6)
+      SKiB = skdf(Kshared, UEi, Di, SB, DB, TS5, ~TS6)
+  in
+  [ Fr(~TS6),
+    StSB_Public(SB, DB, UEi, Di, ltkSB, pkUEi, hi, hB, Mi, mBsec, MB),
+    In(<UEi, SB, Qi, V1, TS5>) ]
+  --[ Eq(MiCheck, Mi),
+      Eq(V1, v1tag(UEi, SB, Mi, MB, Kshared, TS5)),
+      CheckTS5(SB, UEi, TS5),
+      VerifiedV1AtSB(SB, UEi, Qi, V1, TS5),
+      FreshTS6(~TS6),
+      SentPublic2(SB, UEi, QB, V2, ~TS6),
+      DeriveSB(SB, UEi, Kshared, SKiB),
+      AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, ~TS6) ]->
+  [ Out(<SB, UEi, QB, V2, ~TS6>) ]
+
+rule UEi_Public_Recv_Accept:
+  let MBCheck = adec(QB, ltkUEi)
+      Kshared = MB^mIsec
+      SKiB = skdf(Kshared, UEi, Di, SB, DB, TS5, TS6)
+  in
+  [ StUEi_Public(UEi, Di, SB, DB, ltkUEi, mIsec, hi, hB, Mi, MB, Qi, V1, TS5),
+    In(<SB, UEi, QB, V2, TS6>) ]
+  --[ Eq(MBCheck, MB),
+      Eq(V2, v2tag(UEi, SB, Mi, MB, Kshared, TS6)),
+      CheckTS6(UEi, SB, TS6),
+      VerifiedV2AtUEi(UEi, SB, QB, V2, TS6),
+      DeriveUEi(UEi, SB, Kshared, SKiB),
+      AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) ]->
+  [ ]
+
+/* =========================================================================
+   Restrictions (identical to baseline)
+   ========================================================================= */
+
+restriction Equality:
+  "All x y #i. Eq(x, y) @ i ==> x = y"
+
+restriction Inequality:
+  "All x #i. Neq(x, x) @ i ==> F"
+
+restriction UniqueInit:
+  "All A D1 D2 #i #j. InitEntity(A, D1) @ i & InitEntity(A, D2) @ j ==> #i = #j & D1 = D2"
+
+/* =========================================================================
+   Baseline lemmas (unchanged from ssin_cahake_core.spthy)
+   ========================================================================= */
+
+lemma executability_ssin_core:
+  exists-trace
+  "Ex UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j.
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ j"
+
+lemma session_key_secrecy_sb_core:
+  "All SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i
+     ==> not (Ex #j. K(SKiB) @ j)"
+
+lemma session_key_secrecy_uei_core:
+  "All UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i
+     ==> not (Ex #j. K(SKiB) @ j)"
+
+lemma agreement_sb_on_uei_core:
+  "All SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i
+     ==> Ex Z #j. SentPublic1(UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z, TS5), TS5) @ j & j < i"
+
+lemma agreement_uei_on_sb_core:
+  "All UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i
+     ==> Ex Z #j. SentPublic2(SB, UEi, QB, v2tag(UEi, SB, Mi, MB, Z, TS6), TS6) @ j & j < i"
+
+lemma no_replay_sb_accept_core:
+  "All SB UEi SKiB Mi MB Qi QB TS5 TS6 #i #j.
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ j
+     ==> #i = #j"
+
+lemma no_inconsistent_acceptance_core:
+  "All UEi SB SK1 SK2 Mi MB Qi QB TS5 TS6 #i #j.
+     AcceptUEi(UEi, SB, SK1, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     AcceptSB(SB, UEi, SK2, Mi, MB, Qi, QB, TS5, TS6) @ j
+     ==> SK1 = SK2"
+
+/* =========================================================================
+   Priority-1 extensions — new lemmas in this file
+   ========================================================================= */
+
+/*
+ * no_replay_uei_accept_core
+ * -------------------------
+ * Property: Resist Replay Attack (UEi side).
+ *
+ * UEi cannot accept twice on the same complete session tuple.
+ * The proof relies on Tamarin's fresh-value uniqueness for ~TS6 (generated in
+ * SB_Public_Recv_Send) together with StUEi_Public being a linear fact consumed
+ * at most once per pre-auth instance.
+ *
+ * Paper anchor: Section VI-D Step 3 freshness check on TS6; Section VII
+ *   freshness definition.
+ *
+ * Safe reviewer-facing wording:
+ *   "the symbolic model rules out duplicate UEi acceptance events on the same
+ *    (Mi, MB, Qi, QB, TS5, TS6) tuple (non-injective trace-level, no compromise)"
+ */
+lemma no_replay_uei_accept_core:
+  "All UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j.
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ j
+     ==> #i = #j"
+
+/*
+ * mutual_auth_consistent_core
+ * ---------------------------
+ * Property: Mutual Authentication (bidirectional, trace-level).
+ *
+ * If both AcceptSB and AcceptUEi fire on the same complete session tuple, then:
+ *   (a) SB's acceptance is preceded by an honest public-phase send from UEi,
+ *   (b) UEi's acceptance is preceded by an honest public-phase send from SB.
+ *
+ * This combines agreement_sb_on_uei_core and agreement_uei_on_sb_core into a
+ * single statement that requires both parties to have accepted before making
+ * the bidirectional claim.  It does not assert peer acceptance — it asserts
+ * prior honest sends from each peer.
+ *
+ * Interpretation limits (carry over from baseline):
+ *   • "honest send" is witnessed by SentPublic1 / SentPublic2 action facts from
+ *     the honest rule firings, not by full Section VII partnered-instance
+ *     conditions or session identifiers.
+ *   • The claim holds only in the absence of long-term-key or ephemeral-key
+ *     compromise (no Corrupt / StateReveal oracle in this model).
+ *
+ * Paper anchor: Section VI-D Steps 1–3; Section VII Send oracle description.
+ *
+ * Safe reviewer-facing wording:
+ *   "when both parties have accepted on the same session tuple, each acceptance
+ *    is preceded by a matching honest public-phase send from the respective peer
+ *    (non-injective trace-level mutual authentication, no compromise)"
+ */
+lemma mutual_auth_consistent_core:
+  "All UEi SB SKiB Mi MB Qi QB TS5 TS6 #iU #iS.
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ iU &
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ iS
+     ==>
+     (Ex Z1 #j. SentPublic1(UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z1, TS5), TS5) @ j & j < iS) &
+     (Ex Z2 #k. SentPublic2(SB, UEi, QB, v2tag(UEi, SB, Mi, MB, Z2, TS6), TS6) @ k & k < iU)"
+
+/*
+ * full_session_agree_uei_core
+ * ---------------------------
+ * Property: Non-injective session agreement (UEi side).
+ *
+ * If UEi accepts on a complete session tuple, then SB previously accepted on
+ * the SAME tuple — including the same SKiB, Mi, MB, Qi, QB, TS5, TS6.
+ *
+ * This is strictly stronger than agreement_uei_on_sb_core, which only asserts
+ * a matching prior SentPublic2 from SB.  Here we assert that AcceptSB fired
+ * on the identical session parameter set before AcceptUEi.
+ *
+ * Proof argument:
+ *   UEi_Public_Recv_Accept checks Eq(adec(QB, ltkUEi), MB).  For this to hold,
+ *   QB must equal aenc(MB, pkUEi).  The only rule that produces aenc(MB, pkUEi)
+ *   is SB_Public_Recv_Send, which fires AcceptSB at the same time-point as
+ *   SentPublic2 and puts QB into Out.  Since Out precedes In in Tamarin's
+ *   temporal ordering, AcceptSB fires strictly before AcceptUEi.  The session
+ *   parameters in AcceptSB (Mi, MB, Qi, QB, TS5, TS6, SKiB) match those in
+ *   AcceptUEi by the Equality restrictions on MBCheck / V2 and by the DH
+ *   identity Kshared = Mi^mBsec = MB^mIsec.
+ *
+ * Interpretation limits:
+ *   • The claim is non-injective: two distinct UEi accept events could
+ *     theoretically map to the same AcceptSB (though the linear StSB_Public
+ *     fact prevents this in practice).
+ *   • The claim holds only in the absence of long-term-key or ephemeral-key
+ *     compromise (no Corrupt / StateReveal oracle in this model).
+ *   • This does NOT establish the converse (AcceptSB implies AcceptUEi):
+ *     SB accepts before sending the response; UEi may never receive it.
+ *
+ * Paper anchor: Section VI-D Step 3; Section VII mutual-authentication claim.
+ *
+ * Safe reviewer-facing wording:
+ *   "in the no-compromise symbolic model, UEi acceptance implies a prior SB
+ *    acceptance on the same complete session tuple, establishing non-injective
+ *    session agreement at the UEi side (trace-level, no compromise)"
+ */
+lemma full_session_agree_uei_core:
+  "All UEi SB SKiB Mi MB Qi QB TS5 TS6 #iU.
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ iU
+     ==> Ex #iS. AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ iS & iS < iU"
+
+/*
+ * no_key_splitting (key-substitution / key-splitting prevention)
+ * --------------------------------------------------------------
+ * NOTE: This lemma is a KEY-CONSISTENCY check, not a general MitM-prevention
+ * theorem.  The active-MitM resistance claim at the UEi side is carried by
+ * full_session_agree_uei_core.  The SB-side baseline authentication claim is
+ * agreement_sb_on_uei_core (prior honest UEi send).
+ *
+ * NOTE on full_session_agree_sb_core: that lemma was removed.  Its formula was
+ * identical to agreement_sb_on_uei_core (both assert a prior SentPublic1 from
+ * UEi).  The duplicate was structurally correct — SB accepts before UEi
+ * receives the response, so a prior AcceptUEi cannot be asserted.  The
+ * existing agreement_sb_on_uei_core is the authoritative SB-side baseline
+ * authentication lemma and remains in this file.
+ *
+ * Property: No key-splitting attack on accepted sessions.
+ *
+ * If both UEi and SB accept on sessions sharing the same (TS5, TS6) pair,
+ * they derive the same SKiB.  This rules out key-splitting attacks in which
+ * the adversary causes divergent key states at the two endpoints.
+ *
+ * SCOPE BOUNDARY: This is a key-consistency check, not an active-MitM
+ * prevention theorem.  A pure-relay adversary that faithfully forwards all
+ * messages would still satisfy this lemma (both parties accept, SK equal).
+ * The active-MitM resistance — ruling out cross-session relay and identity-
+ * confusion — is established by full_session_agree_uei_core (UEi side);
+ * the SB-side baseline authentication is carried by agreement_sb_on_uei_core
+ * (prior honest UEi send, not acceptance; structurally weaker due to message
+ * ordering; no separate SB-side active-MitM theorem is claimed).
+ *
+ * Session-binding argument:
+ *   TS5 (~TS5) is globally unique by Tamarin's fresh-value axiom.  TS6
+ *   (~TS6) is similarly unique.  Sharing both nonces binds both acceptance
+ *   events to exactly one UEi_Public_Send and one SB_Public_Recv_Send
+ *   firing, from which key equality follows by the Equality restrictions
+ *   and the DH identity Kshared = g^(mIsec*mBsec).
+ *
+ * Interpretation limits:
+ *   - Holds only in the absence of long-term-key or ephemeral-key compromise.
+ *   - Does not assert anything about the adversary's network position.
+ *
+ * Paper anchor: Section VI-D.
+ *
+ * Safe reviewer-facing wording:
+ *   "whenever both parties accept on sessions sharing the same
+ *    (TS5, TS6) pair, they derive the same SKiB, ruling out key-splitting
+ *    attacks (key-consistency check; UEi-side active-MitM resistance is carried
+ *    by full_session_agree_uei_core; SB-side baseline authentication by
+ *    agreement_sb_on_uei_core)"
+ */
+lemma no_key_splitting:
+  "All UEi SB SK1 SK2 Mi1 MB1 Qi1 QB1 Mi2 MB2 Qi2 QB2 TS5 TS6 #i #j.
+     AcceptUEi(UEi, SB, SK1, Mi1, MB1, Qi1, QB1, TS5, TS6) @ i &
+     AcceptSB(SB, UEi, SK2, Mi2, MB2, Qi2, QB2, TS5, TS6) @ j
+   ==>
+     SK1 = SK2"
+
+end

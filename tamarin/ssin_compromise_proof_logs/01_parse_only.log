@@ -1,0 +1,432 @@
+[Theory ssin_cahake_compromise] Theory loaded
+theory ssin_cahake_compromise
+
+begin
+
+// Function signature and definition of the equational theory E
+
+builtins: diffie-hellman
+functions: adec/2, aenc/2, fst/1, hid/3, pair/2, pid_sa/2, pid_sb/2,
+           pid_user/2, pk/1, skdf/7, snd/1, v1tag/6, v2tag/6
+equations:
+    adec(aenc(x.1, pk(x.2)), x.2) = x.1,
+    fst(<x.1, x.2>) = x.1,
+    snd(<x.1, x.2>) = x.2
+
+builtin  diffie-hellman
+
+builtin  asymmetric-encryption
+
+function: hid (Any, Any, Any) : Any 
+
+function: pid_user (Any, Any) : Any 
+
+function: pid_sa (Any, Any) : Any 
+
+function: pid_sb (Any, Any) : Any 
+
+function: v1tag (Any, Any, Any, Any, Any, Any) : Any 
+
+function: v2tag (Any, Any, Any, Any, Any, Any) : Any 
+
+function: skdf (Any, Any, Any, Any, Any, Any, Any) : Any 
+
+rule (modulo E) InitEntity:
+   [ Fr( ~ltk ) ]
+  --[ InitEntity( $A, $D ) ]->
+   [
+   !Ltk( $A, ~ltk ), !Pk( $A, pk(~ltk) ),
+   !Hi( $A, $D, hid($A, $D, pk(~ltk)) ),
+   Out( <$A, $D, pk(~ltk), hid($A, $D, pk(~ltk))> )
+   ]
+
+rule (modulo E) Compromise_LT:
+   [ !Ltk( $A, ltk ) ] --[ CorruptLT( $A ) ]-> [ Out( ltk ) ]
+
+rule (modulo E) Compromise_EP_UEi:
+   [ !EphUEi( $UEi, mIsec ) ]
+  --[ CorruptEP( $UEi, mIsec ) ]->
+   [ Out( mIsec ) ]
+
+rule (modulo E) Compromise_EP_SB:
+   [ !EphSB( $SB, mBsec ) ] --[ CorruptEP( $SB, mBsec ) ]-> [ Out( mBsec ) ]
+
+rule (modulo E) UEi_PreAuth_1:
+   [
+   Fr( ~mIsec ), Fr( ~TS1 ), !Ltk( $UEi, ltkUEi ), !Pk( $UEi, pkUEi ),
+   !Pk( $SB, pkSB ), !Hi( $UEi, $Di, hid($UEi, $Di, pkUEi) )
+   ]
+  --[
+  Neq( $UEi, $SB ), Neq( $UEi, 'SA' ), Neq( $SB, 'SA' ),
+  SentN1( $UEi, 'SA', hid($UEi, $Di, pkUEi), 'g'^~mIsec,
+          pid_user($UEi, 'g'^~mIsec), ~TS1
+  )
+  ]->
+   [
+   !EphUEi( $UEi, ~mIsec ),
+   StUEi_PreAuth( $UEi, $Di, $SB, $DB, ltkUEi, pkSB, hid($UEi, $Di, pkUEi),
+                  ~mIsec, 'g'^~mIsec
+   ),
+   SA_InN1( $UEi, $Di, $SB, $DB, hid($UEi, $Di, pkUEi), 'g'^~mIsec,
+            pid_user($UEi, 'g'^~mIsec), ~TS1
+   )
+   ]
+
+rule (modulo E) SA_PreAuth_2:
+   [ Fr( ~TS2 ), SA_InN1( UEi, Di, SB, DB, hi, Mi, PIDi, TS1 ) ]
+  --[ SentN2( 'SA', SB, hi, Mi, pid_sa('SA', Mi), PIDi, ~TS2 ) ]->
+   [ SB_InN2( UEi, Di, SB, DB, hi, Mi, pid_sa('SA', Mi), PIDi, ~TS2 ) ]
+
+rule (modulo E) SB_PreAuth_3:
+   [
+   Fr( ~mBsec ), Fr( ~TS3 ), !Ltk( $SB, ltkSB ), !Pk( $SB, pkSB ),
+   !Pk( $UEi, pkUEi ), !Hi( $SB, $DB, hid($SB, $DB, pkSB) ),
+   SB_InN2( $UEi, $Di, $SB, $DB, hi, Mi, PIDA, PIDi, TS2 )
+   ]
+  --[
+  SentN3( $SB, 'SA', hid($SB, $DB, pkSB), 'g'^~mBsec, PIDA,
+          pid_sb($SB, 'g'^~mBsec), ~TS3
+  )
+  ]->
+   [
+   !EphSB( $SB, ~mBsec ),
+   StSB_Public( $SB, $DB, $UEi, $Di, ltkSB, pkUEi, hi, hid($SB, $DB, pkSB),
+                Mi, ~mBsec, 'g'^~mBsec
+   ),
+   SA_InN3( $UEi, $Di, $SB, $DB, hid($SB, $DB, pkSB), 'g'^~mBsec, PIDA,
+            pid_sb($SB, 'g'^~mBsec), ~TS3
+   )
+   ]
+
+rule (modulo E) SA_PreAuth_4:
+   [ Fr( ~TS4 ), SA_InN3( UEi, Di, SB, DB, hB, MB, PIDA, PIDB, TS3 ) ]
+  --[ SentN4( 'SA', UEi, hB, MB, PIDA, PIDB, ~TS4 ) ]->
+   [ UEi_InN4( UEi, Di, SB, DB, hB, MB, PIDA, PIDB, ~TS4 ) ]
+
+rule (modulo E) UEi_Public_Send:
+   [
+   Fr( ~TS5 ),
+   StUEi_PreAuth( $UEi, $Di, $SB, $DB, ltkUEi, pkSB, hi, mIsec, Mi ),
+   UEi_InN4( $UEi, $Di, $SB, $DB, hB, MB, PIDA, PIDB, TS4 )
+   ]
+  --[
+  CheckTS4( $UEi, $SB, TS4 ), FreshTS5( ~TS5 ),
+  SentPublic1( $UEi, $SB, aenc(Mi, pkSB),
+               v1tag($UEi, $SB, Mi, MB, MB^mIsec, ~TS5), ~TS5
+  ),
+  CacheUEi( $UEi, $SB, hi, hB, Mi, MB )
+  ]->
+   [
+   StUEi_Public( $UEi, $Di, $SB, $DB, ltkUEi, mIsec, hi, hB, Mi, MB,
+                 aenc(Mi, pkSB), v1tag($UEi, $SB, Mi, MB, MB^mIsec, ~TS5), ~TS5
+   ),
+   Out( <$UEi, $SB, aenc(Mi, pkSB), 
+         v1tag($UEi, $SB, Mi, MB, MB^mIsec, ~TS5), ~TS5>
+   )
+   ]
+
+rule (modulo E) SB_Public_Recv_Send:
+   [
+   Fr( ~TS6 ),
+   StSB_Public( SB, DB, UEi, Di, ltkSB, pkUEi, hi, hB, Mi, mBsec, MB ),
+   In( <UEi, SB, Qi, V1, TS5> )
+   ]
+  --[
+  Eq( adec(Qi, ltkSB), Mi ),
+  Eq( V1, v1tag(UEi, SB, Mi, MB, Mi^mBsec, TS5) ),
+  CheckTS5( SB, UEi, TS5 ), VerifiedV1AtSB( SB, UEi, Qi, V1, TS5 ),
+  FreshTS6( ~TS6 ),
+  SentPublic2( SB, UEi, aenc(MB, pkUEi),
+               v2tag(UEi, SB, Mi, MB, Mi^mBsec, ~TS6), ~TS6
+  ),
+  DeriveSB( SB, UEi, Mi^mBsec, skdf(Mi^mBsec, UEi, Di, SB, DB, TS5, ~TS6)
+  ),
+  AcceptSB( SB, UEi, skdf(Mi^mBsec, UEi, Di, SB, DB, TS5, ~TS6), Mi, MB,
+            Qi, aenc(MB, pkUEi), TS5, ~TS6
+  )
+  ]->
+   [
+   Out( <SB, UEi, aenc(MB, pkUEi), v2tag(UEi, SB, Mi, MB, Mi^mBsec, ~TS6), 
+         ~TS6>
+   )
+   ]
+
+rule (modulo E) UEi_Public_Recv_Accept:
+   [
+   StUEi_Public( UEi, Di, SB, DB, ltkUEi, mIsec, hi, hB, Mi, MB, Qi, V1, TS5
+   ),
+   In( <SB, UEi, QB, V2, TS6> )
+   ]
+  --[
+  Eq( adec(QB, ltkUEi), MB ),
+  Eq( V2, v2tag(UEi, SB, Mi, MB, MB^mIsec, TS6) ),
+  CheckTS6( UEi, SB, TS6 ), VerifiedV2AtUEi( UEi, SB, QB, V2, TS6 ),
+  DeriveUEi( UEi, SB, MB^mIsec, skdf(MB^mIsec, UEi, Di, SB, DB, TS5, TS6)
+  ),
+  AcceptUEi( UEi, SB, skdf(MB^mIsec, UEi, Di, SB, DB, TS5, TS6), Mi, MB,
+             Qi, QB, TS5, TS6
+  )
+  ]->
+   [ ]
+
+restriction Equality:
+  "∀ x y #i. (Eq( x, y ) @ #i) ⇒ (x = y)"
+  // safety formula
+
+restriction Inequality:
+  "∀ x #i. (Neq( x, x ) @ #i) ⇒ (⊥)"
+  // safety formula
+
+restriction UniqueInit:
+  "∀ A D1 D2 #i #j.
+    ((InitEntity( A, D1 ) @ #i) ∧ (InitEntity( A, D2 ) @ #j)) ⇒
+    ((#i = #j) ∧ (D1 = D2))"
+  // safety formula
+
+lemma executability_kci:
+  exists-trace
+  "∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j.
+    (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+    (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j.
+  (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)"
+*/
+by sorry
+
+lemma executability_with_lt_corrupt:
+  exists-trace
+  "∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j #c.
+    ((AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+     (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)) ∧
+    (CorruptLT( SB ) @ #c)"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j #c.
+  (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j) ∧
+  (CorruptLT( SB ) @ #c)"
+*/
+by sorry
+
+lemma executability_with_uei_lt_corrupt:
+  exists-trace
+  "∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j #c.
+    (((AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+      (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)) ∧
+     (CorruptLT( UEi ) @ #c)) ∧
+    (#c < #j)"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j #c.
+  (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j) ∧
+  (CorruptLT( UEi ) @ #c)
+ ∧
+  #c < #j"
+*/
+by sorry
+
+lemma no_replay_sb_accept_core:
+  all-traces
+  "∀ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i #j.
+    ((AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+     (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)) ⇒
+    (#i = #j)"
+/*
+guarded formula characterizing all counter-examples:
+"∃ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i #j.
+  (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+  (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)
+ ∧
+  ¬(#i = #j)"
+*/
+by sorry
+
+lemma no_replay_uei_accept_core:
+  all-traces
+  "∀ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j.
+    ((AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+     (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)) ⇒
+    (#i = #j)"
+/*
+guarded formula characterizing all counter-examples:
+"∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j.
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)
+ ∧
+  ¬(#i = #j)"
+*/
+by sorry
+
+lemma no_inconsistent_acceptance_core:
+  all-traces
+  "∀ UEi SB SK1 SK2 Mi MB Qi QB TS5 TS6 #i #j.
+    ((AcceptUEi( UEi, SB, SK1, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+     (AcceptSB( SB, UEi, SK2, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)) ⇒
+    (SK1 = SK2)"
+/*
+guarded formula characterizing all counter-examples:
+"∃ UEi SB SK1 SK2 Mi MB Qi QB TS5 TS6 #i #j.
+  (AcceptUEi( UEi, SB, SK1, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+  (AcceptSB( SB, UEi, SK2, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)
+ ∧
+  ¬(SK1 = SK2)"
+*/
+by sorry
+
+lemma kci_ea_sb_lt_clean:
+  all-traces
+  "∀ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+    (((AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+      (¬(∃ mIsec #c. (CorruptEP( UEi, mIsec ) @ #c) ∧ (#c < #i)))) ∧
+     (¬(∃ #c. (CorruptLT( SB ) @ #c) ∧ (#c < #i)))) ⇒
+    (∃ Z #j.
+      (SentPublic1( UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z, TS5), TS5 ) @ #j) ∧
+      (#j < #i))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+  (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i)
+ ∧
+  (∀ mIsec #c. (CorruptEP( UEi, mIsec ) @ #c) ⇒ ¬(#c < #i)) ∧
+  (∀ #c. (CorruptLT( SB ) @ #c) ⇒ ¬(#c < #i)) ∧
+  (∀ Z #j.
+    (SentPublic1( UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z, TS5), TS5 ) @ #j)
+   ⇒
+    ¬(#j < #i))"
+*/
+by sorry
+
+lemma kci_ea_uei_lt_clean:
+  all-traces
+  "∀ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+    (((AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+      (¬(∃ mBsec #c. (CorruptEP( SB, mBsec ) @ #c) ∧ (#c < #i)))) ∧
+     (¬(∃ #c. (CorruptLT( UEi ) @ #c) ∧ (#c < #i)))) ⇒
+    (∃ Z #j.
+      (SentPublic2( SB, UEi, QB, v2tag(UEi, SB, Mi, MB, Z, TS6), TS6 ) @ #j) ∧
+      (#j < #i))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i)
+ ∧
+  (∀ mBsec #c. (CorruptEP( SB, mBsec ) @ #c) ⇒ ¬(#c < #i)) ∧
+  (∀ #c. (CorruptLT( UEi ) @ #c) ⇒ ¬(#c < #i)) ∧
+  (∀ Z #j.
+    (SentPublic2( SB, UEi, QB, v2tag(UEi, SB, Mi, MB, Z, TS6), TS6 ) @ #j)
+   ⇒
+    ¬(#j < #i))"
+*/
+by sorry
+
+lemma kci_ea_uei_kci_proper:
+  all-traces
+  "∀ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+    ((((AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+       (¬(∃ mIsec #c. (CorruptEP( UEi, mIsec ) @ #c) ∧ (#c < #i)))) ∧
+      (¬(∃ mBsec #c. (CorruptEP( SB, mBsec ) @ #c) ∧ (#c < #i)))) ∧
+     (¬(∃ #c. (CorruptLT( SB ) @ #c) ∧ (#c < #i)))) ⇒
+    (∃ Z #j.
+      (SentPublic2( SB, UEi, QB, v2tag(UEi, SB, Mi, MB, Z, TS6), TS6 ) @ #j) ∧
+      (#j < #i))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i)
+ ∧
+  (∀ mIsec #c. (CorruptEP( UEi, mIsec ) @ #c) ⇒ ¬(#c < #i)) ∧
+  (∀ mBsec #c. (CorruptEP( SB, mBsec ) @ #c) ⇒ ¬(#c < #i)) ∧
+  (∀ #c. (CorruptLT( SB ) @ #c) ⇒ ¬(#c < #i)) ∧
+  (∀ Z #j.
+    (SentPublic2( SB, UEi, QB, v2tag(UEi, SB, Mi, MB, Z, TS6), TS6 ) @ #j)
+   ⇒
+    ¬(#j < #i))"
+*/
+by sorry
+
+lemma kci_ea_sb_kci_proper:
+  all-traces
+  "∀ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+    ((((AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+       (¬(∃ mBsec #c. (CorruptEP( SB, mBsec ) @ #c) ∧ (#c < #i)))) ∧
+      (¬(∃ mIsec #c. (CorruptEP( UEi, mIsec ) @ #c) ∧ (#c < #i)))) ∧
+     (¬(∃ #c. (CorruptLT( UEi ) @ #c) ∧ (#c < #i)))) ⇒
+    (∃ Z #j.
+      (SentPublic1( UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z, TS5), TS5 ) @ #j) ∧
+      (#j < #i))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+  (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i)
+ ∧
+  (∀ mBsec #c. (CorruptEP( SB, mBsec ) @ #c) ⇒ ¬(#c < #i)) ∧
+  (∀ mIsec #c. (CorruptEP( UEi, mIsec ) @ #c) ⇒ ¬(#c < #i)) ∧
+  (∀ #c. (CorruptLT( UEi ) @ #c) ⇒ ¬(#c < #i)) ∧
+  (∀ Z #j.
+    (SentPublic1( UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z, TS5), TS5 ) @ #j)
+   ⇒
+    ¬(#j < #i))"
+*/
+by sorry
+
+lemma fresh_secrecy_sb_kci:
+  all-traces
+  "∀ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+    (((AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+      (¬(∃ mBsec #c. CorruptEP( SB, mBsec ) @ #c))) ∧
+     (¬(∃ mIsec #c. CorruptEP( UEi, mIsec ) @ #c))) ⇒
+    (¬(∃ #k. K( SKiB ) @ #k))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+  (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i)
+ ∧
+  (∀ mBsec #c. (CorruptEP( SB, mBsec ) @ #c) ⇒ ⊥) ∧
+  (∀ mIsec #c. (CorruptEP( UEi, mIsec ) @ #c) ⇒ ⊥) ∧
+  (∃ #k. (K( SKiB ) @ #k))"
+*/
+by sorry
+
+lemma fresh_secrecy_uei_kci:
+  all-traces
+  "∀ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+    (((AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+      (¬(∃ mIsec #c. CorruptEP( UEi, mIsec ) @ #c))) ∧
+     (¬(∃ mBsec #c. CorruptEP( SB, mBsec ) @ #c))) ⇒
+    (¬(∃ #k. K( SKiB ) @ #k))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i)
+ ∧
+  (∀ mIsec #c. (CorruptEP( UEi, mIsec ) @ #c) ⇒ ⊥) ∧
+  (∀ mBsec #c. (CorruptEP( SB, mBsec ) @ #c) ⇒ ⊥) ∧
+  (∃ #k. (K( SKiB ) @ #k))"
+*/
+by sorry
+
+lemma kci_ake_secrecy_uei_t4:
+  all-traces
+  "∀ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+    ((((AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+       (¬(∃ mIsec #c. CorruptEP( UEi, mIsec ) @ #c))) ∧
+      (¬(∃ mBsec #c. CorruptEP( SB, mBsec ) @ #c))) ∧
+     (¬(∃ #c. (CorruptLT( SB ) @ #c) ∧ (#c < #i)))) ⇒
+    (¬(∃ #k. K( SKiB ) @ #k))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i)
+ ∧
+  (∀ mIsec #c. (CorruptEP( UEi, mIsec ) @ #c) ⇒ ⊥) ∧
+  (∀ mBsec #c. (CorruptEP( SB, mBsec ) @ #c) ⇒ ⊥) ∧
+  (∀ #c. (CorruptLT( SB ) @ #c) ⇒ ¬(#c < #i)) ∧
+  (∃ #k. (K( SKiB ) @ #k))"
+*/
+by sorry
+
+end

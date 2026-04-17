@@ -1,0 +1,359 @@
+theory ssin_cahake_privacy
+begin
+
+/*
+ * ssin_cahake_privacy.spthy
+ * =========================
+ * Phase 3a — Public-channel anonymity skeleton for the instantiated
+ * SSIN-Cahake protocol (Sections VI-C / VI-D of cakake-2nd.pdf).
+ *
+ * STATUS: SKELETON — parses and precomputes in --diff mode; full
+ *   equivalence proof not yet verified automatically (see blockers below).
+ *
+ * This is a SEPARATE artifact from ssin_cahake_core.spthy and
+ * ssin_cahake_compromise.spthy (Phase 2, frozen).  It does NOT modify
+ * those artifacts.
+ *
+ * =========================================================================
+ * A.  Privacy boundary (from cakake-2nd.pdf Section IV-A)
+ * =========================================================================
+ *
+ * Direct quote: "Our anonymity claims are defined with respect to the
+ * public channel since the collaborator observes identities inside the
+ * tunnels."
+ *
+ * Therefore:
+ *   — Pre-authentication tunnels (N1–N4, AEAD-protected through SA):
+ *     SA is an honest semi-honest relay and DOES observe identities here.
+ *     This side is OUTSIDE the anonymity claim and outside this model.
+ *   — Public authentication channel (Step 1: Qi, V1, TS5;
+ *     Step 2: QB, V2, TS6):
+ *     This is the channel for which anonymity is claimed.
+ *     A passive adversary on this channel MUST NOT learn which registered
+ *     user UEi is communicating with SB.
+ *
+ * =========================================================================
+ * B.  What is modeled
+ * =========================================================================
+ *
+ * Protocol shape (public phase only):
+ *
+ *   Pre-auth (abstracted): UEi and SB jointly obtain (Mi, MB) through
+ *     AEAD tunnels.  No Out message here; tunnel contents are confidential.
+ *
+ *   Public Step 1.  UEi → public channel:
+ *     Qi  = aenc(Mi, pkSB)             — Mi hidden under SB's public key
+ *     V1  = v1anon(Mi, MB, Kshared, TS5)  — IDi hidden inside hash H2
+ *     Out(<Qi, V1, TS5>)               — no identity label in Out
+ *
+ *   Public Step 2.  SB → public channel (after verifying Qi and V1):
+ *     QB  = aenc(MB, pku)              — MB hidden under user's public key
+ *     V2  = v2anon(Mi, MB, Kshared, TS6)  — IDi hidden inside hash H2
+ *     Out(<QB, V2, TS6>)               — no identity label in Out
+ *
+ *   pku = diff(pk(~ltkL), pk(~ltkR)):  this is the key diff term.
+ *     In world L, the user's long-term key is ~ltkL → QB = aenc(MB, pk(~ltkL)).
+ *     In world R, the user's long-term key is ~ltkR → QB = aenc(MB, pk(~ltkR)).
+ *
+ * The two worlds for anonymity:
+ *   World L: user identity $UEiL, long-term key ~ltkL
+ *   World R: user identity $UEiR, long-term key ~ltkR
+ *   Same SB, same DH structure, same public-channel shape.
+ *
+ * The nominal user identity (diff($UEiL, $UEiR)) appears ONLY in:
+ *   — Internal action facts (not observable to the adversary)
+ *   — The !LtkUser / !PkUser persistent facts (not directly output)
+ *
+ * The user's public key (diff(pk(~ltkL), pk(~ltkR))) appears in:
+ *   — Init_User Out: adversary sees a fresh public key (pk(~ltkL) or pk(~ltkR))
+ *   — QB = aenc(MB, pku): adversary sees an encryption under that fresh pk
+ *
+ * For Tamarin's bisimulation check: both worlds produce a trace where
+ * the adversary sees "some fresh pk, some Qi, some V1, some aenc(MB, that pk),
+ * some V2".  Since ~ltkL and ~ltkR are both fresh names with the same
+ * structural type, the two worlds should be bisimulatable.
+ *
+ * =========================================================================
+ * C.  What is NOT modeled
+ * =========================================================================
+ *
+ *   1.  Identity hash hi = H1(IDi, Di, pki, Pi) — collapsed into symbolic key.
+ *   2.  Pseudonym PIDi = IDi ⊕ H1(Mi) — NOT encoded (XOR theory omitted;
+ *       see blocker D.1 below).  The public channel does not carry PIDi directly;
+ *       it appears only in the AEAD tunnels (outside this model's scope).
+ *   3.  Tunnel messages N1–N4 — abstracted away (AEAD-confidential, SA-observable).
+ *   4.  Compromise oracles (LT / EP) — not included in the privacy model.
+ *   5.  CLC key structure (SKi = (ski + xi)^{-1} mod q) — collapsed into
+ *       symbolic long-term key ~ltk.
+ *   6.  V1 = H2(IDi, IDB, Mi, MB, Zi, TS5):  the IDi input to H2 is dropped in
+ *       v1anon/4, modeling that IDi is not recoverable from V1 by a passive
+ *       observer (random oracle hiding).  Authentication properties are handled
+ *       by the Phase 2 artifact.
+ *   7.  Unlinkability (cross-session equivalence) — Phase 3b, not yet modeled.
+ *
+ * =========================================================================
+ * D.  Known blockers for a complete observational-equivalence proof
+ * =========================================================================
+ *
+ *   D.1  XOR equational theory omitted.
+ *     The paper's pseudonym construction PIDi = IDi ⊕ H1(Mi) requires the
+ *     `xor` builtin.  Adding `xor` to a theory that already uses
+ *     `diffie-hellman` introduces a combined equational theory.  Tamarin's
+ *     termination guarantees for combined DH+XOR are weak; in practice,
+ *     equivalence proofs with both DH and XOR often do not terminate.
+ *     Since PIDi appears in the AEAD tunnels (not on the public channel),
+ *     it is OUT OF SCOPE for this public-channel anonymity artifact.
+ *     The XOR blocker does not apply here.  (It would apply to a future
+ *     full-anonymity artifact that also covers the tunnel phase.)
+ *
+ *   D.2  QB reveals the user's public key structurally.
+ *     QB = aenc(MB, pk(~ltku)).  The user's public key pk(~ltku) is
+ *     announced in Init_User's Out.  In the symbolic model, the adversary
+ *     knows pk(~ltkL) (world L) or pk(~ltkR) (world R) and sees QB as a
+ *     term whose structure includes that pk.  For the equivalence check to
+ *     succeed, Tamarin needs to recognize that pk(~ltkL) and pk(~ltkR) are
+ *     fresh-name-equivalent (both are pk(fresh)).  If Tamarin's bisimulation
+ *     algorithm does not find this renaming automatically, the equivalence
+ *     proof may fail or not terminate.
+ *
+ *   D.3  DH equational theory slows --diff mode precomputation.
+ *     DH + asymmetric encryption in --diff mode produces a larger state space
+ *     than trace-mode proofs.  Full automatic proof may require extended
+ *     timeouts or oracle guidance.
+ *
+ *   D.4  Unlinkability requires cross-session equivalence.
+ *     Two sessions of the same user must produce indistinguishable transcripts.
+ *     This requires a separate model where the same user (same ~ltku) runs
+ *     multiple sessions, and a different diff setup (same pk, different
+ *     ephemeral per session).  Not modeled in this Phase 3a artifact.
+ *
+ * =========================================================================
+ * E.  Claim discipline
+ * =========================================================================
+ *
+ *   DO NOT SAY:
+ *     "Tamarin verified user anonymity."
+ *     "Tamarin verified unlinkability."
+ *     "This artifact proves Theorem X."
+ *
+ *   SAFE WORDING:
+ *     "A supplementary public-channel anonymity skeleton for the instantiated
+ *      SSIN-Cahake protocol was constructed in Tamarin's observational-
+ *      equivalence (--diff) mode.  The skeleton models two worlds differing
+ *      only in the user's identity assignment and checks that the public-channel
+ *      transcript (Qi, V1, TS5, QB, V2, TS6) is structurally equivalent across
+ *      worlds.  Automatic verification of the full equivalence proof is pending
+ *      due to DH-mode state-space complexity.  User anonymity with respect to
+ *      the public channel is supported by the structural argument that the user's
+ *      nominal identity does not appear in any public-channel output; the public
+ *      key, which does appear indirectly in QB, is structurally interchangeable
+ *      across the two worlds."
+ */
+
+/* =========================================================================
+ * Builtins and function symbols
+ * ========================================================================= */
+
+builtins: diffie-hellman, asymmetric-encryption
+
+functions:
+  v1anon/4,    /* v1anon(Mi, MB, Kshared, TS) — models H2(IDi, IDB, Mi, MB, Zi, TS)
+                  with IDi hidden inside the random oracle hash.
+                  Arity 4 (no identity arg): reflects that IDi is NOT recoverable
+                  from V1 by a passive public-channel observer. */
+  v2anon/4     /* v2anon(Mi, MB, Kshared, TS) — symmetric to v1anon. */
+
+/* =========================================================================
+ * Initialization rules
+ * ========================================================================= */
+
+/*
+ * Init_SB: SB initialization.  Same in both worlds (SB is not the diff axis).
+ * Announces SB's public key on the public channel.
+ */
+rule Init_SB:
+  [ Fr(~ltkSB) ]
+  --[ InitSB($SB) ]->
+  [ !LtkSB($SB, ~ltkSB),
+    !PkSB($SB, pk(~ltkSB)),
+    Out(pk(~ltkSB)) ]
+
+restriction UniqueInitSB:
+  "All SB #i #j. InitSB(SB) @ i & InitSB(SB) @ j ==> #i = #j"
+
+/*
+ * Init_User: User initialization — the ANONYMITY DIFF AXIS.
+ *
+ * Two fresh long-term keys are generated: ~ltkL (world L) and ~ltkR (world R).
+ * diff($UEiL, $UEiR): in world L the user is $UEiL; in world R the user is $UEiR.
+ * diff(~ltkL, ~ltkR): in world L the user's key is ~ltkL; in world R it is ~ltkR.
+ *
+ * Both public keys are announced (pk announced = public registration).
+ * In world L the adversary sees pk(~ltkL); in world R the adversary sees pk(~ltkR).
+ * The nominal identity ($UEiL / $UEiR) is NOT announced — it is the hidden variable.
+ */
+rule Init_User:
+  [ Fr(~ltkL), Fr(~ltkR) ]
+  --[ InitUser(diff($UEiL, $UEiR)) ]->
+  [ !LtkUser(diff($UEiL, $UEiR), diff(~ltkL, ~ltkR)),
+    !PkUser(diff($UEiL, $UEiR), diff(pk(~ltkL), pk(~ltkR))),
+    Out(diff(pk(~ltkL), pk(~ltkR))) ]
+
+restriction UniqueInitUser:
+  "All user #i #j. InitUser(user) @ i & InitUser(user) @ j ==> #i = #j"
+
+/* =========================================================================
+ * Pre-authentication phase — AEAD tunnel abstraction
+ *
+ * In the real protocol (Section VI-C), Steps 1–4 use AEAD-protected tunnels
+ * through SA.  SA observes identities inside the tunnels; this is outside
+ * the public-channel privacy claim.
+ *
+ * Here the tunnel phase is abstracted: UEi and SB jointly obtain fresh
+ * ephemerals (Mi, MB) through a trusted, private setup.  No Out message
+ * is generated — the tunnel contents are AEAD-confidential to the
+ * public-channel adversary.
+ *
+ * The abstraction is intentionally minimal: it hands UEi and SB exactly
+ * the material they need for the public phase.
+ * ========================================================================= */
+
+rule PreAuth_Setup:
+  let Mi = 'g'^~mIsec
+      MB = 'g'^~mBsec
+  in
+  [ Fr(~mIsec),
+    Fr(~mBsec),
+    !LtkUser(user, ltku),
+    !PkUser(user, pku),
+    !PkSB($SB, pkSB) ]
+  --[ PreAuthSetup(user, $SB, Mi, MB) ]->
+  [ /* UEi obtains: ltku (own private key, for QB decryption later),
+                    pkSB (SB's public key, for Qi), mIsec, Mi, MB.
+       UEi does NOT have ~mBsec (SB keeps its ephemeral secret). */
+    StUEi_Public(user, ltku, $SB, pkSB, ~mIsec, Mi, MB),
+    /* SB obtains: pku (user's public key, for QB encryption),
+                   Mi (user's public ephemeral, for verification),
+                   mBsec, MB.
+       SB does NOT have ~mIsec (UEi keeps its ephemeral secret). */
+    StSB_Public($SB, user, pku, Mi, ~mBsec, MB) ]
+
+/* =========================================================================
+ * Public authentication phase
+ *
+ * The adversary fully controls the public channel.
+ * Privacy invariant: the user's nominal identity (diff($UEiL, $UEiR))
+ * must NOT appear in any Out message in this phase.
+ * ========================================================================= */
+
+/*
+ * Step 1.  UEi sends (Qi, V1, TS5) on the public channel.
+ *
+ * Qi = aenc(Mi, pkSB):
+ *   UEi's ephemeral Mi is encrypted under SB's public key.
+ *   A passive observer cannot recover Mi without SB's private key.
+ *   No user identity in Qi.
+ *
+ * V1 = v1anon(Mi, MB, Kshared, TS5):
+ *   Models V1 = H2(IDi, IDB, Mi, MB, Zi, TS5) from the paper (Section VI-D).
+ *   The identity inputs IDi, IDB are omitted from the function symbol,
+ *   reflecting that they are hash inputs hidden by the random oracle
+ *   assumption and not recoverable by a passive observer.
+ *   Kshared = MB^mIsec = g^(mIsec * mBsec) (DH shared secret).
+ *
+ * The user's nominal identity does NOT appear in Out(<Qi, V1, ~TS5>).
+ */
+rule UEi_Public_Send:
+  let Qi      = aenc(Mi, pkSB)
+      Kshared = MB^mIsec
+      V1      = v1anon(Mi, MB, Kshared, ~TS5)
+  in
+  [ Fr(~TS5),
+    StUEi_Public(user, ltku, $SB, pkSB, mIsec, Mi, MB) ]
+  --[ PublicSend(user, $SB, Qi, V1, ~TS5) ]->
+  [ StUEi_Wait(user, ltku, $SB, mIsec, Mi, MB, ~TS5),
+    Out(<Qi, V1, ~TS5>) ]
+
+/*
+ * Step 2.  SB receives (Qi, V1, TS5), verifies, and sends (QB, V2, TS6).
+ *
+ * SB verifies:
+ *   adec(Qi, ltkSB) = Mi   — ephemeral challenge check
+ *   V1 = v1anon(Mi, MB, Kshared, TS5)  — integrity tag check
+ *   (DH: Mi^mBsec = MB^mIsec = Kshared; verified by equational theory.)
+ *
+ * QB = aenc(MB, pku):
+ *   pku = diff(pk(~ltkL), pk(~ltkR)) — THIS IS THE KEY DIFF TERM.
+ *   In world L: QB = aenc(MB, pk(~ltkL)).
+ *   In world R: QB = aenc(MB, pk(~ltkR)).
+ *   QB is the principal structural difference between the two worlds.
+ *   The passive observer sees QB but cannot decrypt it without ltku.
+ *
+ * V2 = v2anon(Mi, MB, Kshared, TS6): symmetric to V1.
+ * The user's nominal identity does NOT appear in Out(<QB, V2, ~TS6>).
+ */
+rule SB_Public_Recv_Send:
+  let MiCheck = adec(Qi, ltkSB)
+      Kshared = MiCheck^mBsec
+      QB      = aenc(MB, pku)
+      V2      = v2anon(MiCheck, MB, Kshared, ~TS6)
+  in
+  [ Fr(~TS6),
+    !LtkSB($SB, ltkSB),
+    StSB_Public($SB, user, pku, Mi, mBsec, MB),
+    In(<Qi, V1, TS5>) ]
+  --[ Eq(MiCheck, Mi),
+      Eq(V1, v1anon(Mi, MB, Kshared, TS5)),
+      SBAccept($SB, user, Mi, MB, Kshared) ]->
+  [ Out(<QB, V2, ~TS6>) ]
+
+/*
+ * Step 3.  UEi receives (QB, V2, TS6), decrypts QB using its private key
+ *   ltku = diff(~ltkL, ~ltkR), verifies V2, and derives the session key.
+ *
+ * In world L: adec(QB, ~ltkL) = adec(aenc(MB, pk(~ltkL)), ~ltkL) = MB. ✓
+ * In world R: adec(QB, ~ltkR) = adec(aenc(MB, pk(~ltkR)), ~ltkR) = MB. ✓
+ * Both worlds correctly recover MB via decryption with the world-local key.
+ */
+rule UEi_Public_Recv:
+  let MBCheck = adec(QB, ltku)
+      Kshared = MBCheck^mIsec
+      V2check = v2anon(Mi, MBCheck, Kshared, TS6)
+  in
+  [ StUEi_Wait(user, ltku, $SB, mIsec, Mi, MB, TS5),
+    In(<QB, V2, TS6>) ]
+  --[ Eq(MBCheck, MB),
+      Eq(V2, V2check),
+      UEiAccept(user, $SB, Mi, MB, Kshared) ]->
+  [ ]
+
+/* =========================================================================
+ * Restrictions
+ * ========================================================================= */
+
+restriction Equality:
+  "All x y #i. Eq(x, y) @ i ==> x = y"
+
+/* =========================================================================
+ * Lemmas
+ *
+ * In --diff mode, all lemmas are checked in BOTH worlds (L and R).
+ * The diff_equivalence (observational equivalence of the two worlds) is
+ * checked automatically by Tamarin when invoked with --diff.
+ * No explicit diffLemma is needed; Tamarin generates the obligation.
+ * ========================================================================= */
+
+/*
+ * Executability sanity check.
+ * Verified if a complete session (PreAuth → PublicSend → SBAccept → UEiAccept)
+ * is reachable in at least one trace in each world.
+ *
+ * Run:  tamarin-prover --diff --prove=privacy_executability ssin_cahake_privacy.spthy
+ */
+lemma privacy_executability:
+  exists-trace
+  "Ex user SB Mi MB K #i #j.
+     SBAccept(SB, user, Mi, MB, K) @ i &
+     UEiAccept(user, SB, Mi, MB, K) @ j"
+
+end

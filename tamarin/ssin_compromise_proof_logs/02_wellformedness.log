@@ -1,0 +1,13 @@
+maude tool: '/usr/local/Cellar/maude/2.7.1_1/bin/maude'
+ checking version: 2.7.1. OK.
+ checking installation: OK.
+[Theory ssin_cahake_compromise] Theory loaded
+[Theory ssin_cahake_compromise] Theory translated
+[Theory ssin_cahake_compromise] Derivation checks started
+[Theory ssin_cahake_compromise] Derivation checks ended
+[Theory ssin_cahake_compromise] Theory closed
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+Multiset rewriting rules and restrictions: 13
+Raw sources: 26 cases, deconstructions complete
+Refined sources: 26 cases, deconstructions complete

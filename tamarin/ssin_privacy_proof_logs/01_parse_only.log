@@ -1,0 +1,131 @@
+diffLemma
+[Theory ssin_cahake_privacy] Theory loaded
+theory ssin_cahake_privacy
+
+begin
+
+// Function signature and definition of the equational theory E
+
+builtins: diffie-hellman
+functions: adec/2, aenc/2, fst/1, pair/2, pk/1, snd/1, v1anon/4, v2anon/4
+equations:
+    adec(aenc(x.1, pk(x.2)), x.2) = x.1,
+    fst(<x.1, x.2>) = x.1,
+    snd(<x.1, x.2>) = x.2
+
+rule (modulo E) Init_SB:
+   [ Fr( ~ltkSB ) ]
+  --[ InitSB( $SB ) ]->
+   [ !LtkSB( $SB, ~ltkSB ), !PkSB( $SB, pk(~ltkSB) ), Out( pk(~ltkSB) ) ]
+
+restriction UniqueInitSB [right]:
+  "∀ SB #i #j. ((InitSB( SB ) @ #i) ∧ (InitSB( SB ) @ #j)) ⇒ (#i = #j)"
+  // safety formula
+
+restriction UniqueInitSB [left]:
+  "∀ SB #i #j. ((InitSB( SB ) @ #i) ∧ (InitSB( SB ) @ #j)) ⇒ (#i = #j)"
+  // safety formula
+
+rule (modulo E) Init_User:
+   [ Fr( ~ltkL ), Fr( ~ltkR ) ]
+  --[ InitUser( diff($UEiL, $UEiR) ) ]->
+   [
+   !LtkUser( diff($UEiL, $UEiR), diff(~ltkL, ~ltkR) ),
+   !PkUser( diff($UEiL, $UEiR), diff(pk(~ltkL), pk(~ltkR)) ),
+   Out( diff(pk(~ltkL), pk(~ltkR)) )
+   ]
+
+restriction UniqueInitUser [right]:
+  "∀ user #i #j.
+    ((InitUser( user ) @ #i) ∧ (InitUser( user ) @ #j)) ⇒ (#i = #j)"
+  // safety formula
+
+restriction UniqueInitUser [left]:
+  "∀ user #i #j.
+    ((InitUser( user ) @ #i) ∧ (InitUser( user ) @ #j)) ⇒ (#i = #j)"
+  // safety formula
+
+rule (modulo E) PreAuth_Setup:
+   [
+   Fr( ~mIsec ), Fr( ~mBsec ), !LtkUser( user, ltku ), !PkUser( user, pku ),
+   !PkSB( $SB, pkSB )
+   ]
+  --[ PreAuthSetup( user, $SB, 'g'^~mIsec, 'g'^~mBsec ) ]->
+   [
+   StUEi_Public( user, ltku, $SB, pkSB, ~mIsec, 'g'^~mIsec, 'g'^~mBsec ),
+   StSB_Public( $SB, user, pku, 'g'^~mIsec, ~mBsec, 'g'^~mBsec )
+   ]
+
+rule (modulo E) UEi_Public_Send:
+   [ Fr( ~TS5 ), StUEi_Public( user, ltku, $SB, pkSB, mIsec, Mi, MB ) ]
+  --[
+  PublicSend( user, $SB, aenc(Mi, pkSB), v1anon(Mi, MB, MB^mIsec, ~TS5),
+              ~TS5
+  )
+  ]->
+   [
+   StUEi_Wait( user, ltku, $SB, mIsec, Mi, MB, ~TS5 ),
+   Out( <aenc(Mi, pkSB), v1anon(Mi, MB, MB^mIsec, ~TS5), ~TS5> )
+   ]
+
+rule (modulo E) SB_Public_Recv_Send:
+   [
+   Fr( ~TS6 ), !LtkSB( $SB, ltkSB ),
+   StSB_Public( $SB, user, pku, Mi, mBsec, MB ), In( <Qi, V1, TS5> )
+   ]
+  --[
+  Eq( adec(Qi, ltkSB), Mi ),
+  Eq( V1, v1anon(Mi, MB, adec(Qi, ltkSB)^mBsec, TS5) ),
+  SBAccept( $SB, user, Mi, MB, adec(Qi, ltkSB)^mBsec )
+  ]->
+   [
+   Out( <aenc(MB, pku), 
+         v2anon(adec(Qi, ltkSB), MB, adec(Qi, ltkSB)^mBsec, ~TS6), ~TS6>
+   )
+   ]
+
+rule (modulo E) UEi_Public_Recv:
+   [ StUEi_Wait( user, ltku, $SB, mIsec, Mi, MB, TS5 ), In( <QB, V2, TS6> )
+   ]
+  --[
+  Eq( adec(QB, ltku), MB ),
+  Eq( V2, v2anon(Mi, adec(QB, ltku), adec(QB, ltku)^mIsec, TS6) ),
+  UEiAccept( user, $SB, Mi, MB, adec(QB, ltku)^mIsec )
+  ]->
+   [ ]
+
+restriction Equality [right]:
+  "∀ x y #i. (Eq( x, y ) @ #i) ⇒ (x = y)"
+  // safety formula
+
+restriction Equality [left]:
+  "∀ x y #i. (Eq( x, y ) @ #i) ⇒ (x = y)"
+  // safety formula
+
+lemma privacy_executability [right]:
+  exists-trace
+  "∃ user SB Mi MB K #i #j.
+    (SBAccept( SB, user, Mi, MB, K ) @ #i) ∧
+    (UEiAccept( user, SB, Mi, MB, K ) @ #j)"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ user SB Mi MB K #i #j.
+  (SBAccept( SB, user, Mi, MB, K ) @ #i) ∧
+  (UEiAccept( user, SB, Mi, MB, K ) @ #j)"
+*/
+by sorry
+
+lemma privacy_executability [left]:
+  exists-trace
+  "∃ user SB Mi MB K #i #j.
+    (SBAccept( SB, user, Mi, MB, K ) @ #i) ∧
+    (UEiAccept( user, SB, Mi, MB, K ) @ #j)"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ user SB Mi MB K #i #j.
+  (SBAccept( SB, user, Mi, MB, K ) @ #i) ∧
+  (UEiAccept( user, SB, Mi, MB, K ) @ #j)"
+*/
+by sorry
+
+end

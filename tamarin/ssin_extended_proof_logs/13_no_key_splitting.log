@@ -1,0 +1,2150 @@
+maude tool: '/usr/local/Cellar/maude/2.7.1_1/bin/maude'
+ checking version: 2.7.1. OK.
+ checking installation: OK.
+[Theory ssin_cahake_core_extended] Theory loaded
+[Theory ssin_cahake_core_extended] Theory translated
+[Theory ssin_cahake_core_extended] Theory closed
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+theory ssin_cahake_core_extended
+
+begin
+
+// Function signature and definition of the equational theory E
+
+builtins: diffie-hellman
+functions: adec/2, aenc/2, fst/1, hid/3, pair/2, pid_sa/2, pid_sb/2,
+           pid_user/2, pk/1, skdf/7, snd/1, v1tag/6, v2tag/6
+equations:
+    adec(aenc(x.1, pk(x.2)), x.2) = x.1,
+    fst(<x.1, x.2>) = x.1,
+    snd(<x.1, x.2>) = x.2
+
+rule (modulo E) InitEntity:
+   [ Fr( ~ltk ) ]
+  --[ InitEntity( $A, $D ) ]->
+   [
+   !Ltk( $A, ~ltk ), !Pk( $A, pk(~ltk) ),
+   !Hi( $A, $D, hid($A, $D, pk(~ltk)) ),
+   Out( <$A, $D, pk(~ltk), hid($A, $D, pk(~ltk))> )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) UEi_PreAuth_1:
+   [
+   Fr( ~mIsec ), Fr( ~TS1 ), !Ltk( $UEi, ltkUEi ), !Pk( $UEi, pkUEi ),
+   !Pk( $SB, pkSB ), !Hi( $UEi, $Di, hid($UEi, $Di, pkUEi) )
+   ]
+  --[
+  Neq( $UEi, $SB ), Neq( $UEi, 'SA' ), Neq( $SB, 'SA' ),
+  SentN1( $UEi, 'SA', hid($UEi, $Di, pkUEi), 'g'^~mIsec,
+          pid_user($UEi, 'g'^~mIsec), ~TS1
+  )
+  ]->
+   [
+   StUEi_PreAuth( $UEi, $Di, $SB, $DB, ltkUEi, pkSB, hid($UEi, $Di, pkUEi),
+                  ~mIsec, 'g'^~mIsec
+   ),
+   SA_InN1( $UEi, $Di, $SB, $DB, hid($UEi, $Di, pkUEi), 'g'^~mIsec,
+            pid_user($UEi, 'g'^~mIsec), ~TS1
+   )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) SA_PreAuth_2:
+   [ Fr( ~TS2 ), SA_InN1( UEi, Di, SB, DB, hi, Mi, PIDi, TS1 ) ]
+  --[ SentN2( 'SA', SB, hi, Mi, pid_sa('SA', Mi), PIDi, ~TS2 ) ]->
+   [ SB_InN2( UEi, Di, SB, DB, hi, Mi, pid_sa('SA', Mi), PIDi, ~TS2 ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) SB_PreAuth_3:
+   [
+   Fr( ~mBsec ), Fr( ~TS3 ), !Ltk( $SB, ltkSB ), !Pk( $SB, pkSB ),
+   !Pk( $UEi, pkUEi ), !Hi( $SB, $DB, hid($SB, $DB, pkSB) ),
+   SB_InN2( $UEi, $Di, $SB, $DB, hi, Mi, PIDA, PIDi, TS2 )
+   ]
+  --[
+  SentN3( $SB, 'SA', hid($SB, $DB, pkSB), 'g'^~mBsec, PIDA,
+          pid_sb($SB, 'g'^~mBsec), ~TS3
+  )
+  ]->
+   [
+   StSB_Public( $SB, $DB, $UEi, $Di, ltkSB, pkUEi, hi, hid($SB, $DB, pkSB),
+                Mi, ~mBsec, 'g'^~mBsec
+   ),
+   SA_InN3( $UEi, $Di, $SB, $DB, hid($SB, $DB, pkSB), 'g'^~mBsec, PIDA,
+            pid_sb($SB, 'g'^~mBsec), ~TS3
+   )
+   ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) SA_PreAuth_4:
+   [ Fr( ~TS4 ), SA_InN3( UEi, Di, SB, DB, hB, MB, PIDA, PIDB, TS3 ) ]
+  --[ SentN4( 'SA', UEi, hB, MB, PIDA, PIDB, ~TS4 ) ]->
+   [ UEi_InN4( UEi, Di, SB, DB, hB, MB, PIDA, PIDB, ~TS4 ) ]
+
+  /* has exactly the trivial AC variant */
+
+rule (modulo E) UEi_Public_Send:
+   [
+   Fr( ~TS5 ),
+   StUEi_PreAuth( $UEi, $Di, $SB, $DB, ltkUEi, pkSB, hi, mIsec, Mi ),
+   UEi_InN4( $UEi, $Di, $SB, $DB, hB, MB, PIDA, PIDB, TS4 )
+   ]
+  --[
+  CheckTS4( $UEi, $SB, TS4 ), FreshTS5( ~TS5 ),
+  SentPublic1( $UEi, $SB, aenc(Mi, pkSB),
+               v1tag($UEi, $SB, Mi, MB, MB^mIsec, ~TS5), ~TS5
+  ),
+  CacheUEi( $UEi, $SB, hi, hB, Mi, MB )
+  ]->
+   [
+   StUEi_Public( $UEi, $Di, $SB, $DB, ltkUEi, mIsec, hi, hB, Mi, MB,
+                 aenc(Mi, pkSB), v1tag($UEi, $SB, Mi, MB, MB^mIsec, ~TS5), ~TS5
+   ),
+   Out( <$UEi, $SB, aenc(Mi, pkSB), 
+         v1tag($UEi, $SB, Mi, MB, MB^mIsec, ~TS5), ~TS5>
+   )
+   ]
+
+  /*
+  rule (modulo AC) UEi_Public_Send:
+     [
+     Fr( ~TS5 ),
+     StUEi_PreAuth( $UEi, $Di, $SB, $DB, ltkUEi, pkSB, hi, mIsec, Mi ),
+     UEi_InN4( $UEi, $Di, $SB, $DB, hB, MB, PIDA, PIDB, TS4 )
+     ]
+    --[
+    CheckTS4( $UEi, $SB, TS4 ), FreshTS5( ~TS5 ),
+    SentPublic1( $UEi, $SB, aenc(Mi, pkSB),
+                 v1tag($UEi, $SB, Mi, MB, z, ~TS5), ~TS5
+    ),
+    CacheUEi( $UEi, $SB, hi, hB, Mi, MB )
+    ]->
+     [
+     StUEi_Public( $UEi, $Di, $SB, $DB, ltkUEi, mIsec, hi, hB, Mi, MB,
+                   aenc(Mi, pkSB), v1tag($UEi, $SB, Mi, MB, z, ~TS5), ~TS5
+     ),
+     Out( <$UEi, $SB, aenc(Mi, pkSB), v1tag($UEi, $SB, Mi, MB, z, ~TS5), ~TS5>
+     )
+     ]
+    variants (modulo AC)
+     1. MB    = MB.17
+        mIsec = mIsec.17
+        z     = MB.17^mIsec.17
+    
+     2. MB    = MB.17
+        mIsec = one
+        z     = MB.17
+    
+     3. MB    = DH_neutral
+        z     = DH_neutral
+    
+     4. MB    = x.17^x.18
+        mIsec = mIsec.19
+        z     = x.17^(x.18*mIsec.19)
+    
+     5. MB    = x.17^x.18
+        mIsec = inv(x.18)
+        z     = x.17
+    
+     6. MB    = x.17^x.18
+        mIsec = inv((x.18*x.26))
+        z     = x.17^inv(x.26)
+    
+     7. MB    = x.17^x.18
+        mIsec = (x.26*inv(x.18))
+        z     = x.17^x.26
+    
+     8. MB    = x.17^x.18
+        mIsec = (x.26*inv((x.18*x.27)))
+        z     = x.17^(x.26*inv(x.27))
+    
+     9. MB    = x.17^inv(x.18)
+        mIsec = x.18
+        z     = x.17
+    
+    10. MB    = x.17^inv(x.18)
+        mIsec = inv(x.26)
+        z     = x.17^inv((x.18*x.26))
+    
+    11. MB    = x.17^inv(x.18)
+        mIsec = (x.18*x.26)
+        z     = x.17^x.26
+    
+    12. MB    = x.17^inv(x.18)
+        mIsec = (x.26*inv(x.27))
+        z     = x.17^(x.26*inv((x.18*x.27)))
+    
+    13. MB    = x.17^inv((x.18*x.19))
+        mIsec = x.18
+        z     = x.17^inv(x.19)
+    
+    14. MB    = x.17^inv((x.18*x.19))
+        mIsec = (x.18*x.27)
+        z     = x.17^(x.27*inv(x.19))
+    
+    15. MB    = x.17^inv((x.18*x.19))
+        mIsec = (x.18*x.27*inv(x.28))
+        z     = x.17^(x.27*inv((x.19*x.28)))
+    
+    16. MB    = x.17^inv((x.18*x.19))
+        mIsec = (x.18*inv(x.27))
+        z     = x.17^inv((x.19*x.27))
+    
+    17. MB    = x.17^(x.18*x.19)
+        mIsec = inv(x.18)
+        z     = x.17^x.19
+    
+    18. MB    = x.17^(x.18*x.19)
+        mIsec = inv((x.18*x.27))
+        z     = x.17^(x.19*inv(x.27))
+    
+    19. MB    = x.17^(x.18*x.19)
+        mIsec = (x.27*inv(x.18))
+        z     = x.17^(x.19*x.27)
+    
+    20. MB    = x.17^(x.18*x.19)
+        mIsec = (x.27*inv((x.18*x.28)))
+        z     = x.17^(x.19*x.27*inv(x.28))
+    
+    21. MB    = x.17^(x.18*x.19*inv(x.20))
+        mIsec = inv((x.18*x.28))
+        z     = x.17^(x.19*inv((x.20*x.28)))
+    
+    22. MB    = x.17^(x.18*x.19*inv(x.20))
+        mIsec = (x.20*x.28*inv(x.18))
+        z     = x.17^(x.19*x.28)
+    
+    23. MB    = x.17^(x.18*x.19*inv(x.20))
+        mIsec = (x.20*x.28*inv((x.18*x.29)))
+        z     = x.17^(x.19*x.28*inv(x.29))
+    
+    24. MB    = x.17^(x.18*x.19*inv(x.20))
+        mIsec = (x.20*inv(x.18))
+        z     = x.17^x.19
+    
+    25. MB    = x.17^(x.18*x.19*inv(x.20))
+        mIsec = (x.20*inv((x.18*x.28)))
+        z     = x.17^(x.19*inv(x.28))
+    
+    26. MB    = x.17^(x.18*x.19*inv(x.20))
+        mIsec = (x.28*inv((x.18*x.29)))
+        z     = x.17^(x.19*x.28*inv((x.20*x.29)))
+    
+    27. MB    = x.17^(x.18*x.19*inv((x.20*x.21)))
+        mIsec = (x.20*x.29*inv(x.18))
+        z     = x.17^(x.19*x.29*inv(x.21))
+    
+    28. MB    = x.17^(x.18*x.19*inv((x.20*x.21)))
+        mIsec = (x.20*x.29*inv((x.18*x.30)))
+        z     = x.17^(x.19*x.29*inv((x.21*x.30)))
+    
+    29. MB    = x.17^(x.18*x.19*inv((x.20*x.21)))
+        mIsec = (x.20*inv(x.18))
+        z     = x.17^(x.19*inv(x.21))
+    
+    30. MB    = x.17^(x.18*x.19*inv((x.20*x.21)))
+        mIsec = (x.20*inv((x.18*x.29)))
+        z     = x.17^(x.19*inv((x.21*x.29)))
+    
+    31. MB    = x.17^(x.18*inv(x.19))
+        mIsec = x.19
+        z     = x.17^x.18
+    
+    32. MB    = x.17^(x.18*inv(x.19))
+        mIsec = inv(x.27)
+        z     = x.17^(x.18*inv((x.19*x.27)))
+    
+    33. MB    = x.17^(x.18*inv(x.19))
+        mIsec = inv((x.18*x.27))
+        z     = x.17^inv((x.19*x.27))
+    
+    34. MB    = x.17^(x.18*inv(x.19))
+        mIsec = (x.19*x.27)
+        z     = x.17^(x.18*x.27)
+    
+    35. MB    = x.17^(x.18*inv(x.19))
+        mIsec = (x.19*x.27*inv(x.18))
+        z     = x.17^x.27
+    
+    36. MB    = x.17^(x.18*inv(x.19))
+        mIsec = (x.19*x.27*inv((x.18*x.28)))
+        z     = x.17^(x.27*inv(x.28))
+    
+    37. MB    = x.17^(x.18*inv(x.19))
+        mIsec = (x.19*inv(x.18))
+        z     = x.17
+    
+    38. MB    = x.17^(x.18*inv(x.19))
+        mIsec = (x.19*inv((x.18*x.27)))
+        z     = x.17^inv(x.27)
+    
+    39. MB    = x.17^(x.18*inv(x.19))
+        mIsec = (x.27*inv(x.28))
+        z     = x.17^(x.18*x.27*inv((x.19*x.28)))
+    
+    40. MB    = x.17^(x.18*inv(x.19))
+        mIsec = (x.27*inv((x.18*x.28)))
+        z     = x.17^(x.27*inv((x.19*x.28)))
+    
+    41. MB    = x.17^(x.18*inv((x.19*x.20)))
+        mIsec = x.19
+        z     = x.17^(x.18*inv(x.20))
+    
+    42. MB    = x.17^(x.18*inv((x.19*x.20)))
+        mIsec = (x.19*x.28)
+        z     = x.17^(x.18*x.28*inv(x.20))
+    
+    43. MB    = x.17^(x.18*inv((x.19*x.20)))
+        mIsec = (x.19*x.28*inv(x.18))
+        z     = x.17^(x.28*inv(x.20))
+    
+    44. MB    = x.17^(x.18*inv((x.19*x.20)))
+        mIsec = (x.19*x.28*inv(x.29))
+        z     = x.17^(x.18*x.28*inv((x.20*x.29)))
+    
+    45. MB    = x.17^(x.18*inv((x.19*x.20)))
+        mIsec = (x.19*x.28*inv((x.18*x.29)))
+        z     = x.17^(x.28*inv((x.20*x.29)))
+    
+    46. MB    = x.17^(x.18*inv((x.19*x.20)))
+        mIsec = (x.19*inv(x.18))
+        z     = x.17^inv(x.20)
+    
+    47. MB    = x.17^(x.18*inv((x.19*x.20)))
+        mIsec = (x.19*inv(x.28))
+        z     = x.17^(x.18*inv((x.20*x.28)))
+    
+    48. MB    = x.17^(x.18*inv((x.19*x.20)))
+        mIsec = (x.19*inv((x.18*x.28)))
+        z     = x.17^inv((x.20*x.28))
+  */
+
+rule (modulo E) SB_Public_Recv_Send:
+   [
+   Fr( ~TS6 ),
+   StSB_Public( SB, DB, UEi, Di, ltkSB, pkUEi, hi, hB, Mi, mBsec, MB ),
+   In( <UEi, SB, Qi, V1, TS5> )
+   ]
+  --[
+  Eq( adec(Qi, ltkSB), Mi ),
+  Eq( V1, v1tag(UEi, SB, Mi, MB, Mi^mBsec, TS5) ),
+  CheckTS5( SB, UEi, TS5 ), VerifiedV1AtSB( SB, UEi, Qi, V1, TS5 ),
+  FreshTS6( ~TS6 ),
+  SentPublic2( SB, UEi, aenc(MB, pkUEi),
+               v2tag(UEi, SB, Mi, MB, Mi^mBsec, ~TS6), ~TS6
+  ),
+  DeriveSB( SB, UEi, Mi^mBsec, skdf(Mi^mBsec, UEi, Di, SB, DB, TS5, ~TS6)
+  ),
+  AcceptSB( SB, UEi, skdf(Mi^mBsec, UEi, Di, SB, DB, TS5, ~TS6), Mi, MB,
+            Qi, aenc(MB, pkUEi), TS5, ~TS6
+  )
+  ]->
+   [
+   Out( <SB, UEi, aenc(MB, pkUEi), v2tag(UEi, SB, Mi, MB, Mi^mBsec, ~TS6), 
+         ~TS6>
+   )
+   ]
+
+  /*
+  rule (modulo AC) SB_Public_Recv_Send:
+     [
+     Fr( ~TS6 ),
+     StSB_Public( SB, DB, UEi, Di, ltkSB, pkUEi, hi, hB, Mi, mBsec, MB ),
+     In( <UEi, SB, Qi, V1, TS5> )
+     ]
+    --[
+    Eq( z.1, Mi ), Eq( V1, v1tag(UEi, SB, Mi, MB, z, TS5) ),
+    CheckTS5( SB, UEi, TS5 ), VerifiedV1AtSB( SB, UEi, Qi, V1, TS5 ),
+    FreshTS6( ~TS6 ),
+    SentPublic2( SB, UEi, aenc(MB, pkUEi), v2tag(UEi, SB, Mi, MB, z, ~TS6),
+                 ~TS6
+    ),
+    DeriveSB( SB, UEi, z, skdf(z, UEi, Di, SB, DB, TS5, ~TS6) ),
+    AcceptSB( SB, UEi, skdf(z, UEi, Di, SB, DB, TS5, ~TS6), Mi, MB, Qi,
+              aenc(MB, pkUEi), TS5, ~TS6
+    )
+    ]->
+     [
+     Out( <SB, UEi, aenc(MB, pkUEi), v2tag(UEi, SB, Mi, MB, z, ~TS6), ~TS6> )
+     ]
+    variants (modulo AC)
+     1. Mi    = Mi.18
+        Qi    = Qi.18
+        ltkSB = ltkSB.18
+        mBsec = mBsec.18
+        z     = Mi.18^mBsec.18
+        z.1   = adec(Qi.18, ltkSB.18)
+    
+     2. Mi    = Mi.18
+        Qi    = Qi.18
+        ltkSB = ltkSB.18
+        mBsec = one
+        z     = Mi.18
+        z.1   = adec(Qi.18, ltkSB.18)
+    
+     3. Mi    = Mi.20
+        Qi    = aenc(x.18, pk(x.19))
+        ltkSB = x.19
+        mBsec = mBsec.20
+        z     = Mi.20^mBsec.20
+        z.1   = x.18
+    
+     4. Mi    = Mi.20
+        Qi    = aenc(x.18, pk(x.19))
+        ltkSB = x.19
+        mBsec = one
+        z     = Mi.20
+        z.1   = x.18
+    
+     5. Mi    = DH_neutral
+        Qi    = Qi.18
+        ltkSB = ltkSB.18
+        z     = DH_neutral
+        z.1   = adec(Qi.18, ltkSB.18)
+    
+     6. Mi    = DH_neutral
+        Qi    = aenc(x.18, pk(x.19))
+        ltkSB = x.19
+        z     = DH_neutral
+        z.1   = x.18
+    
+     7. Mi    = x.18^x.19
+        Qi    = Qi.20
+        ltkSB = ltkSB.20
+        mBsec = mBsec.20
+        z     = x.18^(x.19*mBsec.20)
+        z.1   = adec(Qi.20, ltkSB.20)
+    
+     8. Mi    = x.18^x.19
+        Qi    = Qi.20
+        ltkSB = ltkSB.20
+        mBsec = inv(x.19)
+        z     = x.18
+        z.1   = adec(Qi.20, ltkSB.20)
+    
+     9. Mi    = x.18^x.19
+        Qi    = Qi.29
+        ltkSB = ltkSB.29
+        mBsec = inv((x.19*x.28))
+        z     = x.18^inv(x.28)
+        z.1   = adec(Qi.29, ltkSB.29)
+    
+    10. Mi    = x.18^x.19
+        Qi    = Qi.29
+        ltkSB = ltkSB.29
+        mBsec = (x.28*inv(x.19))
+        z     = x.18^x.28
+        z.1   = adec(Qi.29, ltkSB.29)
+    
+    11. Mi    = x.18^x.19
+        Qi    = Qi.30
+        ltkSB = ltkSB.30
+        mBsec = (x.28*inv((x.19*x.29)))
+        z     = x.18^(x.28*inv(x.29))
+        z.1   = adec(Qi.30, ltkSB.30)
+    
+    12. Mi    = x.18^x.19
+        Qi    = aenc(x.20, pk(x.21))
+        ltkSB = x.21
+        mBsec = mBsec.22
+        z     = x.18^(x.19*mBsec.22)
+        z.1   = x.20
+    
+    13. Mi    = x.18^x.19
+        Qi    = aenc(x.20, pk(x.21))
+        ltkSB = x.21
+        mBsec = inv(x.19)
+        z     = x.18
+        z.1   = x.20
+    
+    14. Mi    = x.18^x.19
+        Qi    = aenc(x.20, pk(x.21))
+        ltkSB = x.21
+        mBsec = inv((x.19*x.28))
+        z     = x.18^inv(x.28)
+        z.1   = x.20
+    
+    15. Mi    = x.18^x.19
+        Qi    = aenc(x.20, pk(x.21))
+        ltkSB = x.21
+        mBsec = (x.28*inv(x.19))
+        z     = x.18^x.28
+        z.1   = x.20
+    
+    16. Mi    = x.18^x.19
+        Qi    = aenc(x.20, pk(x.21))
+        ltkSB = x.21
+        mBsec = (x.28*inv((x.19*x.29)))
+        z     = x.18^(x.28*inv(x.29))
+        z.1   = x.20
+    
+    17. Mi    = x.18^inv(x.19)
+        Qi    = Qi.20
+        ltkSB = ltkSB.20
+        mBsec = x.19
+        z     = x.18
+        z.1   = adec(Qi.20, ltkSB.20)
+    
+    18. Mi    = x.18^inv(x.19)
+        Qi    = Qi.29
+        ltkSB = ltkSB.29
+        mBsec = inv(x.28)
+        z     = x.18^inv((x.19*x.28))
+        z.1   = adec(Qi.29, ltkSB.29)
+    
+    19. Mi    = x.18^inv(x.19)
+        Qi    = Qi.29
+        ltkSB = ltkSB.29
+        mBsec = (x.19*x.28)
+        z     = x.18^x.28
+        z.1   = adec(Qi.29, ltkSB.29)
+    
+    20. Mi    = x.18^inv(x.19)
+        Qi    = Qi.30
+        ltkSB = ltkSB.30
+        mBsec = (x.28*inv(x.29))
+        z     = x.18^(x.28*inv((x.19*x.29)))
+        z.1   = adec(Qi.30, ltkSB.30)
+    
+    21. Mi    = x.18^inv(x.19)
+        Qi    = aenc(x.20, pk(x.21))
+        ltkSB = x.21
+        mBsec = x.19
+        z     = x.18
+        z.1   = x.20
+    
+    22. Mi    = x.18^inv(x.19)
+        Qi    = aenc(x.20, pk(x.21))
+        ltkSB = x.21
+        mBsec = inv(x.28)
+        z     = x.18^inv((x.19*x.28))
+        z.1   = x.20
+    
+    23. Mi    = x.18^inv(x.19)
+        Qi    = aenc(x.20, pk(x.21))
+        ltkSB = x.21
+        mBsec = (x.19*x.28)
+        z     = x.18^x.28
+        z.1   = x.20
+    
+    24. Mi    = x.18^inv(x.19)
+        Qi    = aenc(x.20, pk(x.21))
+        ltkSB = x.21
+        mBsec = (x.28*inv(x.29))
+        z     = x.18^(x.28*inv((x.19*x.29)))
+        z.1   = x.20
+    
+    25. Mi    = x.18^inv((x.19*x.20))
+        Qi    = Qi.21
+        ltkSB = ltkSB.21
+        mBsec = x.19
+        z     = x.18^inv(x.20)
+        z.1   = adec(Qi.21, ltkSB.21)
+    
+    26. Mi    = x.18^inv((x.19*x.20))
+        Qi    = Qi.30
+        ltkSB = ltkSB.30
+        mBsec = (x.19*x.29)
+        z     = x.18^(x.29*inv(x.20))
+        z.1   = adec(Qi.30, ltkSB.30)
+    
+    27. Mi    = x.18^inv((x.19*x.20))
+        Qi    = Qi.30
+        ltkSB = ltkSB.30
+        mBsec = (x.19*inv(x.29))
+        z     = x.18^inv((x.20*x.29))
+        z.1   = adec(Qi.30, ltkSB.30)
+    
+    28. Mi    = x.18^inv((x.19*x.20))
+        Qi    = Qi.31
+        ltkSB = ltkSB.31
+        mBsec = (x.19*x.29*inv(x.30))
+        z     = x.18^(x.29*inv((x.20*x.30)))
+        z.1   = adec(Qi.31, ltkSB.31)
+    
+    29. Mi    = x.18^inv((x.19*x.20))
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = x.19
+        z     = x.18^inv(x.20)
+        z.1   = x.21
+    
+    30. Mi    = x.18^inv((x.19*x.20))
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = (x.19*x.29)
+        z     = x.18^(x.29*inv(x.20))
+        z.1   = x.21
+    
+    31. Mi    = x.18^inv((x.19*x.20))
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = (x.19*x.29*inv(x.30))
+        z     = x.18^(x.29*inv((x.20*x.30)))
+        z.1   = x.21
+    
+    32. Mi    = x.18^inv((x.19*x.20))
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = (x.19*inv(x.29))
+        z     = x.18^inv((x.20*x.29))
+        z.1   = x.21
+    
+    33. Mi    = x.18^(x.19*x.20)
+        Qi    = Qi.21
+        ltkSB = ltkSB.21
+        mBsec = inv(x.19)
+        z     = x.18^x.20
+        z.1   = adec(Qi.21, ltkSB.21)
+    
+    34. Mi    = x.18^(x.19*x.20)
+        Qi    = Qi.30
+        ltkSB = ltkSB.30
+        mBsec = inv((x.19*x.29))
+        z     = x.18^(x.20*inv(x.29))
+        z.1   = adec(Qi.30, ltkSB.30)
+    
+    35. Mi    = x.18^(x.19*x.20)
+        Qi    = Qi.30
+        ltkSB = ltkSB.30
+        mBsec = (x.29*inv(x.19))
+        z     = x.18^(x.20*x.29)
+        z.1   = adec(Qi.30, ltkSB.30)
+    
+    36. Mi    = x.18^(x.19*x.20)
+        Qi    = Qi.31
+        ltkSB = ltkSB.31
+        mBsec = (x.29*inv((x.19*x.30)))
+        z     = x.18^(x.20*x.29*inv(x.30))
+        z.1   = adec(Qi.31, ltkSB.31)
+    
+    37. Mi    = x.18^(x.19*x.20)
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = inv(x.19)
+        z     = x.18^x.20
+        z.1   = x.21
+    
+    38. Mi    = x.18^(x.19*x.20)
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = inv((x.19*x.29))
+        z     = x.18^(x.20*inv(x.29))
+        z.1   = x.21
+    
+    39. Mi    = x.18^(x.19*x.20)
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = (x.29*inv(x.19))
+        z     = x.18^(x.20*x.29)
+        z.1   = x.21
+    
+    40. Mi    = x.18^(x.19*x.20)
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = (x.29*inv((x.19*x.30)))
+        z     = x.18^(x.20*x.29*inv(x.30))
+        z.1   = x.21
+    
+    41. Mi    = x.18^(x.19*x.20*inv(x.21))
+        Qi    = Qi.22
+        ltkSB = ltkSB.22
+        mBsec = (x.21*inv(x.19))
+        z     = x.18^x.20
+        z.1   = adec(Qi.22, ltkSB.22)
+    
+    42. Mi    = x.18^(x.19*x.20*inv(x.21))
+        Qi    = Qi.31
+        ltkSB = ltkSB.31
+        mBsec = inv((x.19*x.30))
+        z     = x.18^(x.20*inv((x.21*x.30)))
+        z.1   = adec(Qi.31, ltkSB.31)
+    
+    43. Mi    = x.18^(x.19*x.20*inv(x.21))
+        Qi    = Qi.31
+        ltkSB = ltkSB.31
+        mBsec = (x.21*x.30*inv(x.19))
+        z     = x.18^(x.20*x.30)
+        z.1   = adec(Qi.31, ltkSB.31)
+    
+    44. Mi    = x.18^(x.19*x.20*inv(x.21))
+        Qi    = Qi.31
+        ltkSB = ltkSB.31
+        mBsec = (x.21*inv((x.19*x.30)))
+        z     = x.18^(x.20*inv(x.30))
+        z.1   = adec(Qi.31, ltkSB.31)
+    
+    45. Mi    = x.18^(x.19*x.20*inv(x.21))
+        Qi    = Qi.32
+        ltkSB = ltkSB.32
+        mBsec = (x.21*x.30*inv((x.19*x.31)))
+        z     = x.18^(x.20*x.30*inv(x.31))
+        z.1   = adec(Qi.32, ltkSB.32)
+    
+    46. Mi    = x.18^(x.19*x.20*inv(x.21))
+        Qi    = Qi.32
+        ltkSB = ltkSB.32
+        mBsec = (x.30*inv((x.19*x.31)))
+        z     = x.18^(x.20*x.30*inv((x.21*x.31)))
+        z.1   = adec(Qi.32, ltkSB.32)
+    
+    47. Mi    = x.18^(x.19*x.20*inv(x.21))
+        Qi    = aenc(x.22, pk(x.23))
+        ltkSB = x.23
+        mBsec = inv((x.19*x.30))
+        z     = x.18^(x.20*inv((x.21*x.30)))
+        z.1   = x.22
+    
+    48. Mi    = x.18^(x.19*x.20*inv(x.21))
+        Qi    = aenc(x.22, pk(x.23))
+        ltkSB = x.23
+        mBsec = (x.21*x.30*inv(x.19))
+        z     = x.18^(x.20*x.30)
+        z.1   = x.22
+    
+    49. Mi    = x.18^(x.19*x.20*inv(x.21))
+        Qi    = aenc(x.22, pk(x.23))
+        ltkSB = x.23
+        mBsec = (x.21*x.30*inv((x.19*x.31)))
+        z     = x.18^(x.20*x.30*inv(x.31))
+        z.1   = x.22
+    
+    50. Mi    = x.18^(x.19*x.20*inv(x.21))
+        Qi    = aenc(x.22, pk(x.23))
+        ltkSB = x.23
+        mBsec = (x.21*inv(x.19))
+        z     = x.18^x.20
+        z.1   = x.22
+    
+    51. Mi    = x.18^(x.19*x.20*inv(x.21))
+        Qi    = aenc(x.22, pk(x.23))
+        ltkSB = x.23
+        mBsec = (x.21*inv((x.19*x.30)))
+        z     = x.18^(x.20*inv(x.30))
+        z.1   = x.22
+    
+    52. Mi    = x.18^(x.19*x.20*inv(x.21))
+        Qi    = aenc(x.22, pk(x.23))
+        ltkSB = x.23
+        mBsec = (x.30*inv((x.19*x.31)))
+        z     = x.18^(x.20*x.30*inv((x.21*x.31)))
+        z.1   = x.22
+    
+    53. Mi    = x.18^(x.19*x.20*inv((x.21*x.22)))
+        Qi    = Qi.23
+        ltkSB = ltkSB.23
+        mBsec = (x.21*inv(x.19))
+        z     = x.18^(x.20*inv(x.22))
+        z.1   = adec(Qi.23, ltkSB.23)
+    
+    54. Mi    = x.18^(x.19*x.20*inv((x.21*x.22)))
+        Qi    = Qi.32
+        ltkSB = ltkSB.32
+        mBsec = (x.21*x.31*inv(x.19))
+        z     = x.18^(x.20*x.31*inv(x.22))
+        z.1   = adec(Qi.32, ltkSB.32)
+    
+    55. Mi    = x.18^(x.19*x.20*inv((x.21*x.22)))
+        Qi    = Qi.32
+        ltkSB = ltkSB.32
+        mBsec = (x.21*inv((x.19*x.31)))
+        z     = x.18^(x.20*inv((x.22*x.31)))
+        z.1   = adec(Qi.32, ltkSB.32)
+    
+    56. Mi    = x.18^(x.19*x.20*inv((x.21*x.22)))
+        Qi    = Qi.33
+        ltkSB = ltkSB.33
+        mBsec = (x.21*x.31*inv((x.19*x.32)))
+        z     = x.18^(x.20*x.31*inv((x.22*x.32)))
+        z.1   = adec(Qi.33, ltkSB.33)
+    
+    57. Mi    = x.18^(x.19*x.20*inv((x.21*x.22)))
+        Qi    = aenc(x.23, pk(x.24))
+        ltkSB = x.24
+        mBsec = (x.21*x.31*inv(x.19))
+        z     = x.18^(x.20*x.31*inv(x.22))
+        z.1   = x.23
+    
+    58. Mi    = x.18^(x.19*x.20*inv((x.21*x.22)))
+        Qi    = aenc(x.23, pk(x.24))
+        ltkSB = x.24
+        mBsec = (x.21*x.31*inv((x.19*x.32)))
+        z     = x.18^(x.20*x.31*inv((x.22*x.32)))
+        z.1   = x.23
+    
+    59. Mi    = x.18^(x.19*x.20*inv((x.21*x.22)))
+        Qi    = aenc(x.23, pk(x.24))
+        ltkSB = x.24
+        mBsec = (x.21*inv(x.19))
+        z     = x.18^(x.20*inv(x.22))
+        z.1   = x.23
+    
+    60. Mi    = x.18^(x.19*x.20*inv((x.21*x.22)))
+        Qi    = aenc(x.23, pk(x.24))
+        ltkSB = x.24
+        mBsec = (x.21*inv((x.19*x.31)))
+        z     = x.18^(x.20*inv((x.22*x.31)))
+        z.1   = x.23
+    
+    61. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = Qi.21
+        ltkSB = ltkSB.21
+        mBsec = x.20
+        z     = x.18^x.19
+        z.1   = adec(Qi.21, ltkSB.21)
+    
+    62. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = Qi.21
+        ltkSB = ltkSB.21
+        mBsec = (x.20*inv(x.19))
+        z     = x.18
+        z.1   = adec(Qi.21, ltkSB.21)
+    
+    63. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = Qi.30
+        ltkSB = ltkSB.30
+        mBsec = inv(x.29)
+        z     = x.18^(x.19*inv((x.20*x.29)))
+        z.1   = adec(Qi.30, ltkSB.30)
+    
+    64. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = Qi.30
+        ltkSB = ltkSB.30
+        mBsec = inv((x.19*x.29))
+        z     = x.18^inv((x.20*x.29))
+        z.1   = adec(Qi.30, ltkSB.30)
+    
+    65. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = Qi.30
+        ltkSB = ltkSB.30
+        mBsec = (x.20*x.29)
+        z     = x.18^(x.19*x.29)
+        z.1   = adec(Qi.30, ltkSB.30)
+    
+    66. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = Qi.30
+        ltkSB = ltkSB.30
+        mBsec = (x.20*x.29*inv(x.19))
+        z     = x.18^x.29
+        z.1   = adec(Qi.30, ltkSB.30)
+    
+    67. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = Qi.30
+        ltkSB = ltkSB.30
+        mBsec = (x.20*inv((x.19*x.29)))
+        z     = x.18^inv(x.29)
+        z.1   = adec(Qi.30, ltkSB.30)
+    
+    68. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = Qi.31
+        ltkSB = ltkSB.31
+        mBsec = (x.20*x.29*inv((x.19*x.30)))
+        z     = x.18^(x.29*inv(x.30))
+        z.1   = adec(Qi.31, ltkSB.31)
+    
+    69. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = Qi.31
+        ltkSB = ltkSB.31
+        mBsec = (x.29*inv(x.30))
+        z     = x.18^(x.19*x.29*inv((x.20*x.30)))
+        z.1   = adec(Qi.31, ltkSB.31)
+    
+    70. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = Qi.31
+        ltkSB = ltkSB.31
+        mBsec = (x.29*inv((x.19*x.30)))
+        z     = x.18^(x.29*inv((x.20*x.30)))
+        z.1   = adec(Qi.31, ltkSB.31)
+    
+    71. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = x.20
+        z     = x.18^x.19
+        z.1   = x.21
+    
+    72. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = inv(x.29)
+        z     = x.18^(x.19*inv((x.20*x.29)))
+        z.1   = x.21
+    
+    73. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = inv((x.19*x.29))
+        z     = x.18^inv((x.20*x.29))
+        z.1   = x.21
+    
+    74. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = (x.20*x.29)
+        z     = x.18^(x.19*x.29)
+        z.1   = x.21
+    
+    75. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = (x.20*x.29*inv(x.19))
+        z     = x.18^x.29
+        z.1   = x.21
+    
+    76. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = (x.20*x.29*inv((x.19*x.30)))
+        z     = x.18^(x.29*inv(x.30))
+        z.1   = x.21
+    
+    77. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = (x.20*inv(x.19))
+        z     = x.18
+        z.1   = x.21
+    
+    78. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = (x.20*inv((x.19*x.29)))
+        z     = x.18^inv(x.29)
+        z.1   = x.21
+    
+    79. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = (x.29*inv(x.30))
+        z     = x.18^(x.19*x.29*inv((x.20*x.30)))
+        z.1   = x.21
+    
+    80. Mi    = x.18^(x.19*inv(x.20))
+        Qi    = aenc(x.21, pk(x.22))
+        ltkSB = x.22
+        mBsec = (x.29*inv((x.19*x.30)))
+        z     = x.18^(x.29*inv((x.20*x.30)))
+        z.1   = x.21
+    
+    81. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = Qi.22
+        ltkSB = ltkSB.22
+        mBsec = x.20
+        z     = x.18^(x.19*inv(x.21))
+        z.1   = adec(Qi.22, ltkSB.22)
+    
+    82. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = Qi.22
+        ltkSB = ltkSB.22
+        mBsec = (x.20*inv(x.19))
+        z     = x.18^inv(x.21)
+        z.1   = adec(Qi.22, ltkSB.22)
+    
+    83. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = Qi.31
+        ltkSB = ltkSB.31
+        mBsec = (x.20*x.30)
+        z     = x.18^(x.19*x.30*inv(x.21))
+        z.1   = adec(Qi.31, ltkSB.31)
+    
+    84. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = Qi.31
+        ltkSB = ltkSB.31
+        mBsec = (x.20*x.30*inv(x.19))
+        z     = x.18^(x.30*inv(x.21))
+        z.1   = adec(Qi.31, ltkSB.31)
+    
+    85. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = Qi.31
+        ltkSB = ltkSB.31
+        mBsec = (x.20*inv(x.30))
+        z     = x.18^(x.19*inv((x.21*x.30)))
+        z.1   = adec(Qi.31, ltkSB.31)
+    
+    86. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = Qi.31
+        ltkSB = ltkSB.31
+        mBsec = (x.20*inv((x.19*x.30)))
+        z     = x.18^inv((x.21*x.30))
+        z.1   = adec(Qi.31, ltkSB.31)
+    
+    87. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = Qi.32
+        ltkSB = ltkSB.32
+        mBsec = (x.20*x.30*inv(x.31))
+        z     = x.18^(x.19*x.30*inv((x.21*x.31)))
+        z.1   = adec(Qi.32, ltkSB.32)
+    
+    88. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = Qi.32
+        ltkSB = ltkSB.32
+        mBsec = (x.20*x.30*inv((x.19*x.31)))
+        z     = x.18^(x.30*inv((x.21*x.31)))
+        z.1   = adec(Qi.32, ltkSB.32)
+    
+    89. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = aenc(x.22, pk(x.23))
+        ltkSB = x.23
+        mBsec = x.20
+        z     = x.18^(x.19*inv(x.21))
+        z.1   = x.22
+    
+    90. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = aenc(x.22, pk(x.23))
+        ltkSB = x.23
+        mBsec = (x.20*x.30)
+        z     = x.18^(x.19*x.30*inv(x.21))
+        z.1   = x.22
+    
+    91. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = aenc(x.22, pk(x.23))
+        ltkSB = x.23
+        mBsec = (x.20*x.30*inv(x.19))
+        z     = x.18^(x.30*inv(x.21))
+        z.1   = x.22
+    
+    92. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = aenc(x.22, pk(x.23))
+        ltkSB = x.23
+        mBsec = (x.20*x.30*inv(x.31))
+        z     = x.18^(x.19*x.30*inv((x.21*x.31)))
+        z.1   = x.22
+    
+    93. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = aenc(x.22, pk(x.23))
+        ltkSB = x.23
+        mBsec = (x.20*x.30*inv((x.19*x.31)))
+        z     = x.18^(x.30*inv((x.21*x.31)))
+        z.1   = x.22
+    
+    94. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = aenc(x.22, pk(x.23))
+        ltkSB = x.23
+        mBsec = (x.20*inv(x.19))
+        z     = x.18^inv(x.21)
+        z.1   = x.22
+    
+    95. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = aenc(x.22, pk(x.23))
+        ltkSB = x.23
+        mBsec = (x.20*inv(x.30))
+        z     = x.18^(x.19*inv((x.21*x.30)))
+        z.1   = x.22
+    
+    96. Mi    = x.18^(x.19*inv((x.20*x.21)))
+        Qi    = aenc(x.22, pk(x.23))
+        ltkSB = x.23
+        mBsec = (x.20*inv((x.19*x.30)))
+        z     = x.18^inv((x.21*x.30))
+        z.1   = x.22
+  */
+
+rule (modulo E) UEi_Public_Recv_Accept:
+   [
+   StUEi_Public( UEi, Di, SB, DB, ltkUEi, mIsec, hi, hB, Mi, MB, Qi, V1, TS5
+   ),
+   In( <SB, UEi, QB, V2, TS6> )
+   ]
+  --[
+  Eq( adec(QB, ltkUEi), MB ),
+  Eq( V2, v2tag(UEi, SB, Mi, MB, MB^mIsec, TS6) ),
+  CheckTS6( UEi, SB, TS6 ), VerifiedV2AtUEi( UEi, SB, QB, V2, TS6 ),
+  DeriveUEi( UEi, SB, MB^mIsec, skdf(MB^mIsec, UEi, Di, SB, DB, TS5, TS6)
+  ),
+  AcceptUEi( UEi, SB, skdf(MB^mIsec, UEi, Di, SB, DB, TS5, TS6), Mi, MB,
+             Qi, QB, TS5, TS6
+  )
+  ]->
+   [ ]
+
+  /*
+  rule (modulo AC) UEi_Public_Recv_Accept:
+     [
+     StUEi_Public( UEi, Di, SB, DB, ltkUEi, mIsec, hi, hB, Mi, MB, Qi, V1, TS5
+     ),
+     In( <SB, UEi, QB, V2, TS6> )
+     ]
+    --[
+    Eq( z, MB ), Eq( V2, v2tag(UEi, SB, Mi, MB, z.1, TS6) ),
+    CheckTS6( UEi, SB, TS6 ), VerifiedV2AtUEi( UEi, SB, QB, V2, TS6 ),
+    DeriveUEi( UEi, SB, z.1, skdf(z.1, UEi, Di, SB, DB, TS5, TS6) ),
+    AcceptUEi( UEi, SB, skdf(z.1, UEi, Di, SB, DB, TS5, TS6), Mi, MB, Qi, QB,
+               TS5, TS6
+    )
+    ]->
+     [ ]
+    variants (modulo AC)
+     1. MB    = MB.19
+        QB    = QB.19
+        ltkUEi
+              = ltkUEi.19
+        mIsec = mIsec.19
+        z     = adec(QB.19, ltkUEi.19)
+        z.1   = MB.19^mIsec.19
+    
+     2. MB    = MB.19
+        QB    = QB.19
+        ltkUEi
+              = ltkUEi.19
+        mIsec = one
+        z     = adec(QB.19, ltkUEi.19)
+        z.1   = MB.19
+    
+     3. MB    = MB.21
+        QB    = aenc(x.19, pk(x.20))
+        ltkUEi
+              = x.20
+        mIsec = mIsec.21
+        z     = x.19
+        z.1   = MB.21^mIsec.21
+    
+     4. MB    = MB.21
+        QB    = aenc(x.19, pk(x.20))
+        ltkUEi
+              = x.20
+        mIsec = one
+        z     = x.19
+        z.1   = MB.21
+    
+     5. MB    = DH_neutral
+        QB    = QB.19
+        ltkUEi
+              = ltkUEi.19
+        z     = adec(QB.19, ltkUEi.19)
+        z.1   = DH_neutral
+    
+     6. MB    = DH_neutral
+        QB    = aenc(x.19, pk(x.20))
+        ltkUEi
+              = x.20
+        z     = x.19
+        z.1   = DH_neutral
+    
+     7. MB    = x.19^x.20
+        QB    = QB.21
+        ltkUEi
+              = ltkUEi.21
+        mIsec = mIsec.21
+        z     = adec(QB.21, ltkUEi.21)
+        z.1   = x.19^(x.20*mIsec.21)
+    
+     8. MB    = x.19^x.20
+        QB    = QB.21
+        ltkUEi
+              = ltkUEi.21
+        mIsec = inv(x.20)
+        z     = adec(QB.21, ltkUEi.21)
+        z.1   = x.19
+    
+     9. MB    = x.19^x.20
+        QB    = QB.34
+        ltkUEi
+              = ltkUEi.34
+        mIsec = inv((x.20*x.33))
+        z     = adec(QB.34, ltkUEi.34)
+        z.1   = x.19^inv(x.33)
+    
+    10. MB    = x.19^x.20
+        QB    = QB.34
+        ltkUEi
+              = ltkUEi.34
+        mIsec = (x.33*inv(x.20))
+        z     = adec(QB.34, ltkUEi.34)
+        z.1   = x.19^x.33
+    
+    11. MB    = x.19^x.20
+        QB    = QB.35
+        ltkUEi
+              = ltkUEi.35
+        mIsec = (x.33*inv((x.20*x.34)))
+        z     = adec(QB.35, ltkUEi.35)
+        z.1   = x.19^(x.33*inv(x.34))
+    
+    12. MB    = x.19^x.20
+        QB    = aenc(x.22, pk(x.23))
+        ltkUEi
+              = x.23
+        mIsec = mIsec.24
+        z     = x.22
+        z.1   = x.19^(x.20*mIsec.24)
+    
+    13. MB    = x.19^x.20
+        QB    = aenc(x.22, pk(x.23))
+        ltkUEi
+              = x.23
+        mIsec = inv(x.20)
+        z     = x.22
+        z.1   = x.19
+    
+    14. MB    = x.19^x.20
+        QB    = aenc(x.22, pk(x.23))
+        ltkUEi
+              = x.23
+        mIsec = inv((x.20*x.33))
+        z     = x.22
+        z.1   = x.19^inv(x.33)
+    
+    15. MB    = x.19^x.20
+        QB    = aenc(x.22, pk(x.23))
+        ltkUEi
+              = x.23
+        mIsec = (x.33*inv(x.20))
+        z     = x.22
+        z.1   = x.19^x.33
+    
+    16. MB    = x.19^x.20
+        QB    = aenc(x.22, pk(x.23))
+        ltkUEi
+              = x.23
+        mIsec = (x.33*inv((x.20*x.34)))
+        z     = x.22
+        z.1   = x.19^(x.33*inv(x.34))
+    
+    17. MB    = x.19^inv(x.20)
+        QB    = QB.21
+        ltkUEi
+              = ltkUEi.21
+        mIsec = x.20
+        z     = adec(QB.21, ltkUEi.21)
+        z.1   = x.19
+    
+    18. MB    = x.19^inv(x.20)
+        QB    = QB.34
+        ltkUEi
+              = ltkUEi.34
+        mIsec = inv(x.33)
+        z     = adec(QB.34, ltkUEi.34)
+        z.1   = x.19^inv((x.20*x.33))
+    
+    19. MB    = x.19^inv(x.20)
+        QB    = QB.34
+        ltkUEi
+              = ltkUEi.34
+        mIsec = (x.20*x.33)
+        z     = adec(QB.34, ltkUEi.34)
+        z.1   = x.19^x.33
+    
+    20. MB    = x.19^inv(x.20)
+        QB    = QB.35
+        ltkUEi
+              = ltkUEi.35
+        mIsec = (x.33*inv(x.34))
+        z     = adec(QB.35, ltkUEi.35)
+        z.1   = x.19^(x.33*inv((x.20*x.34)))
+    
+    21. MB    = x.19^inv(x.20)
+        QB    = aenc(x.22, pk(x.23))
+        ltkUEi
+              = x.23
+        mIsec = x.20
+        z     = x.22
+        z.1   = x.19
+    
+    22. MB    = x.19^inv(x.20)
+        QB    = aenc(x.22, pk(x.23))
+        ltkUEi
+              = x.23
+        mIsec = inv(x.33)
+        z     = x.22
+        z.1   = x.19^inv((x.20*x.33))
+    
+    23. MB    = x.19^inv(x.20)
+        QB    = aenc(x.22, pk(x.23))
+        ltkUEi
+              = x.23
+        mIsec = (x.20*x.33)
+        z     = x.22
+        z.1   = x.19^x.33
+    
+    24. MB    = x.19^inv(x.20)
+        QB    = aenc(x.22, pk(x.23))
+        ltkUEi
+              = x.23
+        mIsec = (x.33*inv(x.34))
+        z     = x.22
+        z.1   = x.19^(x.33*inv((x.20*x.34)))
+    
+    25. MB    = x.19^inv((x.20*x.21))
+        QB    = QB.22
+        ltkUEi
+              = ltkUEi.22
+        mIsec = x.20
+        z     = adec(QB.22, ltkUEi.22)
+        z.1   = x.19^inv(x.21)
+    
+    26. MB    = x.19^inv((x.20*x.21))
+        QB    = QB.35
+        ltkUEi
+              = ltkUEi.35
+        mIsec = (x.20*x.34)
+        z     = adec(QB.35, ltkUEi.35)
+        z.1   = x.19^(x.34*inv(x.21))
+    
+    27. MB    = x.19^inv((x.20*x.21))
+        QB    = QB.35
+        ltkUEi
+              = ltkUEi.35
+        mIsec = (x.20*inv(x.34))
+        z     = adec(QB.35, ltkUEi.35)
+        z.1   = x.19^inv((x.21*x.34))
+    
+    28. MB    = x.19^inv((x.20*x.21))
+        QB    = QB.36
+        ltkUEi
+              = ltkUEi.36
+        mIsec = (x.20*x.34*inv(x.35))
+        z     = adec(QB.36, ltkUEi.36)
+        z.1   = x.19^(x.34*inv((x.21*x.35)))
+    
+    29. MB    = x.19^inv((x.20*x.21))
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = x.20
+        z     = x.23
+        z.1   = x.19^inv(x.21)
+    
+    30. MB    = x.19^inv((x.20*x.21))
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = (x.20*x.34)
+        z     = x.23
+        z.1   = x.19^(x.34*inv(x.21))
+    
+    31. MB    = x.19^inv((x.20*x.21))
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = (x.20*x.34*inv(x.35))
+        z     = x.23
+        z.1   = x.19^(x.34*inv((x.21*x.35)))
+    
+    32. MB    = x.19^inv((x.20*x.21))
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = (x.20*inv(x.34))
+        z     = x.23
+        z.1   = x.19^inv((x.21*x.34))
+    
+    33. MB    = x.19^(x.20*x.21)
+        QB    = QB.22
+        ltkUEi
+              = ltkUEi.22
+        mIsec = inv(x.20)
+        z     = adec(QB.22, ltkUEi.22)
+        z.1   = x.19^x.21
+    
+    34. MB    = x.19^(x.20*x.21)
+        QB    = QB.35
+        ltkUEi
+              = ltkUEi.35
+        mIsec = inv((x.20*x.34))
+        z     = adec(QB.35, ltkUEi.35)
+        z.1   = x.19^(x.21*inv(x.34))
+    
+    35. MB    = x.19^(x.20*x.21)
+        QB    = QB.35
+        ltkUEi
+              = ltkUEi.35
+        mIsec = (x.34*inv(x.20))
+        z     = adec(QB.35, ltkUEi.35)
+        z.1   = x.19^(x.21*x.34)
+    
+    36. MB    = x.19^(x.20*x.21)
+        QB    = QB.36
+        ltkUEi
+              = ltkUEi.36
+        mIsec = (x.34*inv((x.20*x.35)))
+        z     = adec(QB.36, ltkUEi.36)
+        z.1   = x.19^(x.21*x.34*inv(x.35))
+    
+    37. MB    = x.19^(x.20*x.21)
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = inv(x.20)
+        z     = x.23
+        z.1   = x.19^x.21
+    
+    38. MB    = x.19^(x.20*x.21)
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = inv((x.20*x.34))
+        z     = x.23
+        z.1   = x.19^(x.21*inv(x.34))
+    
+    39. MB    = x.19^(x.20*x.21)
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = (x.34*inv(x.20))
+        z     = x.23
+        z.1   = x.19^(x.21*x.34)
+    
+    40. MB    = x.19^(x.20*x.21)
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = (x.34*inv((x.20*x.35)))
+        z     = x.23
+        z.1   = x.19^(x.21*x.34*inv(x.35))
+    
+    41. MB    = x.19^(x.20*x.21*inv(x.22))
+        QB    = QB.23
+        ltkUEi
+              = ltkUEi.23
+        mIsec = (x.22*inv(x.20))
+        z     = adec(QB.23, ltkUEi.23)
+        z.1   = x.19^x.21
+    
+    42. MB    = x.19^(x.20*x.21*inv(x.22))
+        QB    = QB.36
+        ltkUEi
+              = ltkUEi.36
+        mIsec = inv((x.20*x.35))
+        z     = adec(QB.36, ltkUEi.36)
+        z.1   = x.19^(x.21*inv((x.22*x.35)))
+    
+    43. MB    = x.19^(x.20*x.21*inv(x.22))
+        QB    = QB.36
+        ltkUEi
+              = ltkUEi.36
+        mIsec = (x.22*x.35*inv(x.20))
+        z     = adec(QB.36, ltkUEi.36)
+        z.1   = x.19^(x.21*x.35)
+    
+    44. MB    = x.19^(x.20*x.21*inv(x.22))
+        QB    = QB.36
+        ltkUEi
+              = ltkUEi.36
+        mIsec = (x.22*inv((x.20*x.35)))
+        z     = adec(QB.36, ltkUEi.36)
+        z.1   = x.19^(x.21*inv(x.35))
+    
+    45. MB    = x.19^(x.20*x.21*inv(x.22))
+        QB    = QB.37
+        ltkUEi
+              = ltkUEi.37
+        mIsec = (x.22*x.35*inv((x.20*x.36)))
+        z     = adec(QB.37, ltkUEi.37)
+        z.1   = x.19^(x.21*x.35*inv(x.36))
+    
+    46. MB    = x.19^(x.20*x.21*inv(x.22))
+        QB    = QB.37
+        ltkUEi
+              = ltkUEi.37
+        mIsec = (x.35*inv((x.20*x.36)))
+        z     = adec(QB.37, ltkUEi.37)
+        z.1   = x.19^(x.21*x.35*inv((x.22*x.36)))
+    
+    47. MB    = x.19^(x.20*x.21*inv(x.22))
+        QB    = aenc(x.24, pk(x.25))
+        ltkUEi
+              = x.25
+        mIsec = inv((x.20*x.35))
+        z     = x.24
+        z.1   = x.19^(x.21*inv((x.22*x.35)))
+    
+    48. MB    = x.19^(x.20*x.21*inv(x.22))
+        QB    = aenc(x.24, pk(x.25))
+        ltkUEi
+              = x.25
+        mIsec = (x.22*x.35*inv(x.20))
+        z     = x.24
+        z.1   = x.19^(x.21*x.35)
+    
+    49. MB    = x.19^(x.20*x.21*inv(x.22))
+        QB    = aenc(x.24, pk(x.25))
+        ltkUEi
+              = x.25
+        mIsec = (x.22*x.35*inv((x.20*x.36)))
+        z     = x.24
+        z.1   = x.19^(x.21*x.35*inv(x.36))
+    
+    50. MB    = x.19^(x.20*x.21*inv(x.22))
+        QB    = aenc(x.24, pk(x.25))
+        ltkUEi
+              = x.25
+        mIsec = (x.22*inv(x.20))
+        z     = x.24
+        z.1   = x.19^x.21
+    
+    51. MB    = x.19^(x.20*x.21*inv(x.22))
+        QB    = aenc(x.24, pk(x.25))
+        ltkUEi
+              = x.25
+        mIsec = (x.22*inv((x.20*x.35)))
+        z     = x.24
+        z.1   = x.19^(x.21*inv(x.35))
+    
+    52. MB    = x.19^(x.20*x.21*inv(x.22))
+        QB    = aenc(x.24, pk(x.25))
+        ltkUEi
+              = x.25
+        mIsec = (x.35*inv((x.20*x.36)))
+        z     = x.24
+        z.1   = x.19^(x.21*x.35*inv((x.22*x.36)))
+    
+    53. MB    = x.19^(x.20*x.21*inv((x.22*x.23)))
+        QB    = QB.24
+        ltkUEi
+              = ltkUEi.24
+        mIsec = (x.22*inv(x.20))
+        z     = adec(QB.24, ltkUEi.24)
+        z.1   = x.19^(x.21*inv(x.23))
+    
+    54. MB    = x.19^(x.20*x.21*inv((x.22*x.23)))
+        QB    = QB.37
+        ltkUEi
+              = ltkUEi.37
+        mIsec = (x.22*x.36*inv(x.20))
+        z     = adec(QB.37, ltkUEi.37)
+        z.1   = x.19^(x.21*x.36*inv(x.23))
+    
+    55. MB    = x.19^(x.20*x.21*inv((x.22*x.23)))
+        QB    = QB.37
+        ltkUEi
+              = ltkUEi.37
+        mIsec = (x.22*inv((x.20*x.36)))
+        z     = adec(QB.37, ltkUEi.37)
+        z.1   = x.19^(x.21*inv((x.23*x.36)))
+    
+    56. MB    = x.19^(x.20*x.21*inv((x.22*x.23)))
+        QB    = QB.38
+        ltkUEi
+              = ltkUEi.38
+        mIsec = (x.22*x.36*inv((x.20*x.37)))
+        z     = adec(QB.38, ltkUEi.38)
+        z.1   = x.19^(x.21*x.36*inv((x.23*x.37)))
+    
+    57. MB    = x.19^(x.20*x.21*inv((x.22*x.23)))
+        QB    = aenc(x.25, pk(x.26))
+        ltkUEi
+              = x.26
+        mIsec = (x.22*x.36*inv(x.20))
+        z     = x.25
+        z.1   = x.19^(x.21*x.36*inv(x.23))
+    
+    58. MB    = x.19^(x.20*x.21*inv((x.22*x.23)))
+        QB    = aenc(x.25, pk(x.26))
+        ltkUEi
+              = x.26
+        mIsec = (x.22*x.36*inv((x.20*x.37)))
+        z     = x.25
+        z.1   = x.19^(x.21*x.36*inv((x.23*x.37)))
+    
+    59. MB    = x.19^(x.20*x.21*inv((x.22*x.23)))
+        QB    = aenc(x.25, pk(x.26))
+        ltkUEi
+              = x.26
+        mIsec = (x.22*inv(x.20))
+        z     = x.25
+        z.1   = x.19^(x.21*inv(x.23))
+    
+    60. MB    = x.19^(x.20*x.21*inv((x.22*x.23)))
+        QB    = aenc(x.25, pk(x.26))
+        ltkUEi
+              = x.26
+        mIsec = (x.22*inv((x.20*x.36)))
+        z     = x.25
+        z.1   = x.19^(x.21*inv((x.23*x.36)))
+    
+    61. MB    = x.19^(x.20*inv(x.21))
+        QB    = QB.22
+        ltkUEi
+              = ltkUEi.22
+        mIsec = x.21
+        z     = adec(QB.22, ltkUEi.22)
+        z.1   = x.19^x.20
+    
+    62. MB    = x.19^(x.20*inv(x.21))
+        QB    = QB.22
+        ltkUEi
+              = ltkUEi.22
+        mIsec = (x.21*inv(x.20))
+        z     = adec(QB.22, ltkUEi.22)
+        z.1   = x.19
+    
+    63. MB    = x.19^(x.20*inv(x.21))
+        QB    = QB.35
+        ltkUEi
+              = ltkUEi.35
+        mIsec = inv(x.34)
+        z     = adec(QB.35, ltkUEi.35)
+        z.1   = x.19^(x.20*inv((x.21*x.34)))
+    
+    64. MB    = x.19^(x.20*inv(x.21))
+        QB    = QB.35
+        ltkUEi
+              = ltkUEi.35
+        mIsec = inv((x.20*x.34))
+        z     = adec(QB.35, ltkUEi.35)
+        z.1   = x.19^inv((x.21*x.34))
+    
+    65. MB    = x.19^(x.20*inv(x.21))
+        QB    = QB.35
+        ltkUEi
+              = ltkUEi.35
+        mIsec = (x.21*x.34)
+        z     = adec(QB.35, ltkUEi.35)
+        z.1   = x.19^(x.20*x.34)
+    
+    66. MB    = x.19^(x.20*inv(x.21))
+        QB    = QB.35
+        ltkUEi
+              = ltkUEi.35
+        mIsec = (x.21*x.34*inv(x.20))
+        z     = adec(QB.35, ltkUEi.35)
+        z.1   = x.19^x.34
+    
+    67. MB    = x.19^(x.20*inv(x.21))
+        QB    = QB.35
+        ltkUEi
+              = ltkUEi.35
+        mIsec = (x.21*inv((x.20*x.34)))
+        z     = adec(QB.35, ltkUEi.35)
+        z.1   = x.19^inv(x.34)
+    
+    68. MB    = x.19^(x.20*inv(x.21))
+        QB    = QB.36
+        ltkUEi
+              = ltkUEi.36
+        mIsec = (x.21*x.34*inv((x.20*x.35)))
+        z     = adec(QB.36, ltkUEi.36)
+        z.1   = x.19^(x.34*inv(x.35))
+    
+    69. MB    = x.19^(x.20*inv(x.21))
+        QB    = QB.36
+        ltkUEi
+              = ltkUEi.36
+        mIsec = (x.34*inv(x.35))
+        z     = adec(QB.36, ltkUEi.36)
+        z.1   = x.19^(x.20*x.34*inv((x.21*x.35)))
+    
+    70. MB    = x.19^(x.20*inv(x.21))
+        QB    = QB.36
+        ltkUEi
+              = ltkUEi.36
+        mIsec = (x.34*inv((x.20*x.35)))
+        z     = adec(QB.36, ltkUEi.36)
+        z.1   = x.19^(x.34*inv((x.21*x.35)))
+    
+    71. MB    = x.19^(x.20*inv(x.21))
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = x.21
+        z     = x.23
+        z.1   = x.19^x.20
+    
+    72. MB    = x.19^(x.20*inv(x.21))
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = inv(x.34)
+        z     = x.23
+        z.1   = x.19^(x.20*inv((x.21*x.34)))
+    
+    73. MB    = x.19^(x.20*inv(x.21))
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = inv((x.20*x.34))
+        z     = x.23
+        z.1   = x.19^inv((x.21*x.34))
+    
+    74. MB    = x.19^(x.20*inv(x.21))
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = (x.21*x.34)
+        z     = x.23
+        z.1   = x.19^(x.20*x.34)
+    
+    75. MB    = x.19^(x.20*inv(x.21))
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = (x.21*x.34*inv(x.20))
+        z     = x.23
+        z.1   = x.19^x.34
+    
+    76. MB    = x.19^(x.20*inv(x.21))
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = (x.21*x.34*inv((x.20*x.35)))
+        z     = x.23
+        z.1   = x.19^(x.34*inv(x.35))
+    
+    77. MB    = x.19^(x.20*inv(x.21))
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = (x.21*inv(x.20))
+        z     = x.23
+        z.1   = x.19
+    
+    78. MB    = x.19^(x.20*inv(x.21))
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = (x.21*inv((x.20*x.34)))
+        z     = x.23
+        z.1   = x.19^inv(x.34)
+    
+    79. MB    = x.19^(x.20*inv(x.21))
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = (x.34*inv(x.35))
+        z     = x.23
+        z.1   = x.19^(x.20*x.34*inv((x.21*x.35)))
+    
+    80. MB    = x.19^(x.20*inv(x.21))
+        QB    = aenc(x.23, pk(x.24))
+        ltkUEi
+              = x.24
+        mIsec = (x.34*inv((x.20*x.35)))
+        z     = x.23
+        z.1   = x.19^(x.34*inv((x.21*x.35)))
+    
+    81. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = QB.23
+        ltkUEi
+              = ltkUEi.23
+        mIsec = x.21
+        z     = adec(QB.23, ltkUEi.23)
+        z.1   = x.19^(x.20*inv(x.22))
+    
+    82. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = QB.23
+        ltkUEi
+              = ltkUEi.23
+        mIsec = (x.21*inv(x.20))
+        z     = adec(QB.23, ltkUEi.23)
+        z.1   = x.19^inv(x.22)
+    
+    83. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = QB.36
+        ltkUEi
+              = ltkUEi.36
+        mIsec = (x.21*x.35)
+        z     = adec(QB.36, ltkUEi.36)
+        z.1   = x.19^(x.20*x.35*inv(x.22))
+    
+    84. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = QB.36
+        ltkUEi
+              = ltkUEi.36
+        mIsec = (x.21*x.35*inv(x.20))
+        z     = adec(QB.36, ltkUEi.36)
+        z.1   = x.19^(x.35*inv(x.22))
+    
+    85. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = QB.36
+        ltkUEi
+              = ltkUEi.36
+        mIsec = (x.21*inv(x.35))
+        z     = adec(QB.36, ltkUEi.36)
+        z.1   = x.19^(x.20*inv((x.22*x.35)))
+    
+    86. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = QB.36
+        ltkUEi
+              = ltkUEi.36
+        mIsec = (x.21*inv((x.20*x.35)))
+        z     = adec(QB.36, ltkUEi.36)
+        z.1   = x.19^inv((x.22*x.35))
+    
+    87. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = QB.37
+        ltkUEi
+              = ltkUEi.37
+        mIsec = (x.21*x.35*inv(x.36))
+        z     = adec(QB.37, ltkUEi.37)
+        z.1   = x.19^(x.20*x.35*inv((x.22*x.36)))
+    
+    88. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = QB.37
+        ltkUEi
+              = ltkUEi.37
+        mIsec = (x.21*x.35*inv((x.20*x.36)))
+        z     = adec(QB.37, ltkUEi.37)
+        z.1   = x.19^(x.35*inv((x.22*x.36)))
+    
+    89. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = aenc(x.24, pk(x.25))
+        ltkUEi
+              = x.25
+        mIsec = x.21
+        z     = x.24
+        z.1   = x.19^(x.20*inv(x.22))
+    
+    90. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = aenc(x.24, pk(x.25))
+        ltkUEi
+              = x.25
+        mIsec = (x.21*x.35)
+        z     = x.24
+        z.1   = x.19^(x.20*x.35*inv(x.22))
+    
+    91. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = aenc(x.24, pk(x.25))
+        ltkUEi
+              = x.25
+        mIsec = (x.21*x.35*inv(x.20))
+        z     = x.24
+        z.1   = x.19^(x.35*inv(x.22))
+    
+    92. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = aenc(x.24, pk(x.25))
+        ltkUEi
+              = x.25
+        mIsec = (x.21*x.35*inv(x.36))
+        z     = x.24
+        z.1   = x.19^(x.20*x.35*inv((x.22*x.36)))
+    
+    93. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = aenc(x.24, pk(x.25))
+        ltkUEi
+              = x.25
+        mIsec = (x.21*x.35*inv((x.20*x.36)))
+        z     = x.24
+        z.1   = x.19^(x.35*inv((x.22*x.36)))
+    
+    94. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = aenc(x.24, pk(x.25))
+        ltkUEi
+              = x.25
+        mIsec = (x.21*inv(x.20))
+        z     = x.24
+        z.1   = x.19^inv(x.22)
+    
+    95. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = aenc(x.24, pk(x.25))
+        ltkUEi
+              = x.25
+        mIsec = (x.21*inv(x.35))
+        z     = x.24
+        z.1   = x.19^(x.20*inv((x.22*x.35)))
+    
+    96. MB    = x.19^(x.20*inv((x.21*x.22)))
+        QB    = aenc(x.24, pk(x.25))
+        ltkUEi
+              = x.25
+        mIsec = (x.21*inv((x.20*x.35)))
+        z     = x.24
+        z.1   = x.19^inv((x.22*x.35))
+  */
+
+restriction Equality:
+  "∀ x y #i. (Eq( x, y ) @ #i) ⇒ (x = y)"
+  // safety formula
+
+  /*
+  expanded formula:
+  "∀ x y #i. (Eq( x, y ) @ #i) ⇒ (x = y)"
+  */
+
+restriction Inequality:
+  "∀ x #i. (Neq( x, x ) @ #i) ⇒ (⊥)"
+  // safety formula
+
+  /*
+  expanded formula:
+  "∀ x #i. (Neq( x, x ) @ #i) ⇒ (⊥)"
+  */
+
+restriction UniqueInit:
+  "∀ A D1 D2 #i #j.
+    ((InitEntity( A, D1 ) @ #i) ∧ (InitEntity( A, D2 ) @ #j)) ⇒
+    ((#i = #j) ∧ (D1 = D2))"
+  // safety formula
+
+  /*
+  expanded formula:
+  "∀ A D1 D2 #i #j.
+    ((InitEntity( A, D1 ) @ #i) ∧ (InitEntity( A, D2 ) @ #j)) ⇒
+    ((#i = #j) ∧ (D1 = D2))"
+  */
+
+lemma executability_ssin_core:
+  exists-trace
+  "∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j.
+    (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+    (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)"
+/*
+guarded formula characterizing all satisfying traces:
+"∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j.
+  (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)"
+*/
+by sorry
+
+lemma session_key_secrecy_sb_core:
+  all-traces
+  "∀ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+    (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ⇒
+    (¬(∃ #j. K( SKiB ) @ #j))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+  (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i)
+ ∧
+  ∃ #j. (K( SKiB ) @ #j)"
+*/
+by sorry
+
+lemma session_key_secrecy_uei_core:
+  all-traces
+  "∀ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+    (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ⇒
+    (¬(∃ #j. K( SKiB ) @ #j))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i)
+ ∧
+  ∃ #j. (K( SKiB ) @ #j)"
+*/
+by sorry
+
+lemma agreement_sb_on_uei_core:
+  all-traces
+  "∀ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+    (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ⇒
+    (∃ Z #j.
+      (SentPublic1( UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z, TS5), TS5 ) @ #j) ∧
+      (#j < #i))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+  (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i)
+ ∧
+  ∀ Z #j.
+   (SentPublic1( UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z, TS5), TS5 ) @ #j)
+  ⇒
+   ¬(#j < #i)"
+*/
+by sorry
+
+lemma agreement_uei_on_sb_core:
+  all-traces
+  "∀ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+    (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ⇒
+    (∃ Z #j.
+      (SentPublic2( SB, UEi, QB, v2tag(UEi, SB, Mi, MB, Z, TS6), TS6 ) @ #j) ∧
+      (#j < #i))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i)
+ ∧
+  ∀ Z #j.
+   (SentPublic2( SB, UEi, QB, v2tag(UEi, SB, Mi, MB, Z, TS6), TS6 ) @ #j)
+  ⇒
+   ¬(#j < #i)"
+*/
+by sorry
+
+lemma no_replay_sb_accept_core:
+  all-traces
+  "∀ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i #j.
+    ((AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+     (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)) ⇒
+    (#i = #j)"
+/*
+guarded formula characterizing all counter-examples:
+"∃ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i #j.
+  (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+  (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)
+ ∧
+  ¬(#i = #j)"
+*/
+by sorry
+
+lemma no_inconsistent_acceptance_core:
+  all-traces
+  "∀ UEi SB SK1 SK2 Mi MB Qi QB TS5 TS6 #i #j.
+    ((AcceptUEi( UEi, SB, SK1, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+     (AcceptSB( SB, UEi, SK2, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)) ⇒
+    (SK1 = SK2)"
+/*
+guarded formula characterizing all counter-examples:
+"∃ UEi SB SK1 SK2 Mi MB Qi QB TS5 TS6 #i #j.
+  (AcceptUEi( UEi, SB, SK1, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+  (AcceptSB( SB, UEi, SK2, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)
+ ∧
+  ¬(SK1 = SK2)"
+*/
+by sorry
+
+lemma no_replay_uei_accept_core:
+  all-traces
+  "∀ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j.
+    ((AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+     (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)) ⇒
+    (#i = #j)"
+/*
+guarded formula characterizing all counter-examples:
+"∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j.
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ∧
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #j)
+ ∧
+  ¬(#i = #j)"
+*/
+by sorry
+
+lemma mutual_auth_consistent_core:
+  all-traces
+  "∀ UEi SB SKiB Mi MB Qi QB TS5 TS6 #iU #iS.
+    ((AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #iU) ∧
+     (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #iS)) ⇒
+    ((∃ Z1 #j.
+       (SentPublic1( UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z1, TS5), TS5 ) @ #j) ∧
+       (#j < #iS)) ∧
+     (∃ Z2 #k.
+       (SentPublic2( SB, UEi, QB, v2tag(UEi, SB, Mi, MB, Z2, TS6), TS6 ) @ #k) ∧
+       (#k < #iU)))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #iU #iS.
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #iU) ∧
+  (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #iS)
+ ∧
+  ((∀ Z1 #j.
+     (SentPublic1( UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z1, TS5), TS5 ) @ #j)
+    ⇒
+     ¬(#j < #iS)) ∨
+   (∀ Z2 #k.
+     (SentPublic2( SB, UEi, QB, v2tag(UEi, SB, Mi, MB, Z2, TS6), TS6 ) @ #k)
+    ⇒
+     ¬(#k < #iU)))"
+*/
+by sorry
+
+lemma full_session_agree_uei_core:
+  all-traces
+  "∀ UEi SB SKiB Mi MB Qi QB TS5 TS6 #iU.
+    (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #iU) ⇒
+    (∃ #iS.
+      (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #iS) ∧
+      (#iS < #iU))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ UEi SB SKiB Mi MB Qi QB TS5 TS6 #iU.
+  (AcceptUEi( UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #iU)
+ ∧
+  ∀ #iS.
+   (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #iS)
+  ⇒
+   ¬(#iS < #iU)"
+*/
+by sorry
+
+lemma full_session_agree_sb_core:
+  all-traces
+  "∀ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+    (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i) ⇒
+    (∃ Z #j.
+      (SentPublic1( UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z, TS5), TS5 ) @ #j) ∧
+      (#j < #i))"
+/*
+guarded formula characterizing all counter-examples:
+"∃ SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+  (AcceptSB( SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6 ) @ #i)
+ ∧
+  ∀ Z #j.
+   (SentPublic1( UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z, TS5), TS5 ) @ #j)
+  ⇒
+   ¬(#j < #i)"
+*/
+by sorry
+
+lemma no_key_splitting:
+  all-traces
+  "∀ UEi SB SK1 SK2 Mi1 MB1 Qi1 QB1 Mi2 MB2 Qi2 QB2 TS5 TS6 #i #j.
+    ((AcceptUEi( UEi, SB, SK1, Mi1, MB1, Qi1, QB1, TS5, TS6 ) @ #i) ∧
+     (AcceptSB( SB, UEi, SK2, Mi2, MB2, Qi2, QB2, TS5, TS6 ) @ #j)) ⇒
+    (SK1 = SK2)"
+/*
+guarded formula characterizing all counter-examples:
+"∃ UEi SB SK1 SK2 Mi1 MB1 Qi1 QB1 Mi2 MB2 Qi2 QB2 TS5 TS6 #i #j.
+  (AcceptUEi( UEi, SB, SK1, Mi1, MB1, Qi1, QB1, TS5, TS6 ) @ #i) ∧
+  (AcceptSB( SB, UEi, SK2, Mi2, MB2, Qi2, QB2, TS5, TS6 ) @ #j)
+ ∧
+  ¬(SK1 = SK2)"
+*/
+simplify
+solve( StUEi_Public( UEi, Di, SB, DB, ltkUEi, mIsec, hi, hB, Mi1, MB1,
+                     Qi1, V1, TS5
+       ) ▶₀ #i )
+  case UEi_Public_Send
+  solve( StSB_Public( $SB, DB.1, $UEi, Di.1, ltkSB, pkUEi, hi, hB, Mi2,
+                      mBsec.1, MB2
+         ) ▶₁ #j )
+    case SB_PreAuth_3
+    solve( !KU( v2tag($UEi, $SB, 'g'^~mIsec, 'g'^~mBsec, 'g'^(~mBsec*~mIsec),
+                      ~TS6)
+           ) @ #vk.9 )
+      case SB_Public_Recv_Send
+      by contradiction /* from formulas */
+    next
+      case c_v2tag
+      solve( !KU( 'g'^(~mBsec*~mIsec) ) @ #vk.18 )
+        case SB_Public_Recv_Send
+        by solve( !KU( ~ltk ) @ #vk.26 )
+      next
+        case UEi_Public_Send
+        by solve( !KU( ~ltk.1 ) @ #vk.19 )
+      next
+        case c_exp
+        by solve( !KU( ~mBsec ) @ #vk.21 )
+      qed
+    qed
+  qed
+qed
+
+/* All wellformedness checks were successful. */
+
+/*
+Generated from:
+Tamarin version 1.12.0
+Maude version 2.7.1
+Git revision: UNKNOWN, branch: UNKNOWN
+Compiled at: 2026-04-05 15:24:50.862807 UTC
+*/
+
+end
+
+==============================================================================
+summary of summaries:
+
+analyzed: /Users/lixuru/Documents/Stu_codes/Cakake-Tamarin_new/tamarin/ssin_cahake_core_extended.spthy
+
+  processing time: 8.35s
+  
+  executability_ssin_core (exists-trace): analysis incomplete (1 steps)
+  session_key_secrecy_sb_core (all-traces): analysis incomplete (1 steps)
+  session_key_secrecy_uei_core (all-traces): analysis incomplete (1 steps)
+  agreement_sb_on_uei_core (all-traces): analysis incomplete (1 steps)
+  agreement_uei_on_sb_core (all-traces): analysis incomplete (1 steps)
+  no_replay_sb_accept_core (all-traces): analysis incomplete (1 steps)
+  no_inconsistent_acceptance_core (all-traces): analysis incomplete (1 steps)
+  no_replay_uei_accept_core (all-traces): analysis incomplete (1 steps)
+  mutual_auth_consistent_core (all-traces): analysis incomplete (1 steps)
+  full_session_agree_uei_core (all-traces): analysis incomplete (1 steps)
+  full_session_agree_sb_core (all-traces): analysis incomplete (1 steps)
+  no_key_splitting (all-traces): verified (9 steps)
+
+==============================================================================

@@ -1,0 +1,41 @@
+maude tool: '/usr/local/Cellar/maude/2.7.1_1/bin/maude'
+ checking version: 2.7.1. OK.
+ checking installation: OK.
+diffLemma
+[Theory ssin_cahake_privacy] Theory loaded
+[Theory ssin_cahake_privacy] Theory translated
+[Theory ssin_cahake_privacy] Derivation checks started
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Theory ssin_cahake_privacy] Derivation checks ended
+[Theory ssin_cahake_privacy] Theory closed
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+LHS: Multiset rewriting rules and restrictions: 8
+RHS: Multiset rewriting rules and restrictions: 8
+LHS: Multiset rewriting rules and restrictions [Diff]: 8
+RHS: Multiset rewriting rules and restrictions [Diff]: 8
+LHS: Raw sources: 16 cases, deconstructions complete
+RHS: Raw sources: 16 cases, deconstructions complete
+LHS: Raw sources [Diff]: 16 cases, deconstructions complete
+RHS: Raw sources [Diff]: 16 cases, deconstructions complete
+LHS: Refined sources: 16 cases, deconstructions complete
+RHS: Refined sources: 16 cases, deconstructions complete
+LHS: Refined sources [Diff]: 16 cases, deconstructions complete
+RHS: Refined sources [Diff]: 16 cases, deconstructions complete

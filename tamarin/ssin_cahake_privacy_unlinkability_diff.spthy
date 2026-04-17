@@ -1,0 +1,171 @@
+theory ssin_cahake_privacy_unlinkability_diff
+begin
+
+/*
+ * ssin_cahake_privacy_unlinkability_diff.spthy
+ * Phase 3b: Real observational-equivalence unlinkability experiment.
+ *
+ * PURPOSE
+ * -------
+ * The standard-mode artifact (ssin_cahake_privacy_unlinkability.spthy) is
+ * diagnostic only: it confirms no adversary-visible stable cross-session
+ * handle exists on the online public channel, but it does NOT prove
+ * unlinkability.  This --diff artifact attempts the real unlinkability game.
+ *
+ * UNLINKABILITY GAME
+ * ------------------
+ * Left world (L): the SAME registered user executes TWO online sessions.
+ *   Session 1 uses key ~xu1 (user A, session 1).
+ *   Session 2 uses key ~xu1 (user A, session 2 — same user).
+ *
+ * Right world (R): TWO DIFFERENT registered users each execute ONE session.
+ *   Session 1 uses key ~xu1 (user A, one session).
+ *   Session 2 uses key ~xu2 (user B, one session — DIFFERENT user).
+ *
+ * Encoding: Init_Keys creates persistent facts !KeyS1(~xu1) and
+ *   !KeyS2(diff(~xu1, ~xu2)).
+ *   - In world L: !KeyS2 holds ~xu1 → both sessions use same exponent.
+ *   - In world R: !KeyS2 holds ~xu2 → sessions use different exponents.
+ *   Registration is NOT output: no Out('g'^~xu1), no Out('g'^~xu2).
+ *
+ * QB FAITHFUL ABSTRACTION
+ * -----------------------
+ * Paper formula (Section VI-D):
+ *   QB = mB · PKi_derived
+ *   PKi_derived = hi · Ppub,i + pki + Pi   (user-specific, long-term)
+ *   mB = fresh per session
+ *
+ * Symbolic DH model:
+ *   QB = ('g'^xu)^~mBsec = 'g'^(xu * ~mBsec)
+ *
+ * In world L: QB1 = 'g'^(~xu1 * ~r1),  QB2 = 'g'^(~xu1 * ~r2)
+ * In world R: QB1 = 'g'^(~xu1 * ~r1),  QB2 = 'g'^(~xu2 * ~r2)
+ *
+ * ACTUAL TAMARIN OUTCOME (2026-04-13)
+ * ------------------------------------
+ * The DiffLemma Observational_equivalence is VERIFIED (21140 steps).
+ *
+ * NOTE: An earlier draft of this comment block incorrectly predicted that
+ * the DiffLemma would fail due to a "symbolic DDH gap" — the argument being
+ * that ~xu1 in both sessions of world L would prevent a globally consistent
+ * bisimulation renaming.  This prediction was WRONG.
+ *
+ * Why the bisimulation SUCCEEDS:
+ *   ~xu1 appears only inside DH products: 'g'^(~xu1 * ~mBsec).
+ *   In Tamarin's symbolic DH model, the adversary cannot recover ~xu1
+ *   from 'g'^(~xu1 * ~mBsec) (DH inversion is not available).
+ *   Therefore the shared exponent ~xu1 across sessions in world L is NOT
+ *   adversary-observable.  Tamarin's bisimulation algorithm finds a valid
+ *   proof with MIRRORED leaves at all cases, confirming no counterexample.
+ *
+ * TOOLCHAIN NOTE
+ * --------------
+ * Run with --diff flag:
+ *   tamarin-prover --diff --parse-only        ssin_cahake_privacy_unlinkability_diff.spthy
+ *   tamarin-prover --diff --precompute-only   ssin_cahake_privacy_unlinkability_diff.spthy
+ *   tamarin-prover --diff --prove             ssin_cahake_privacy_unlinkability_diff.spthy
+ *
+ * Verified results (log: ssin_privacy_proof_logs/07_phase3b_observational_equivalence.log):
+ *   --parse-only            : PASS
+ *   --precompute-only       : PASS (12 source cases, deconstructions complete)
+ *   unlink_executability [left]  : verified (6 steps)
+ *   unlink_executability [right] : verified (6 steps)
+ *   DiffLemma Observational_equivalence : VERIFIED (21140 steps)
+ *
+ * RELATION TO PHASE 3a
+ * --------------------
+ * Phase 3a (ssin_cahake_privacy.spthy) verified a SINGLE-session anonymity
+ * diff model: one user in world L vs a different user in world R.  That
+ * diff(userL, userR) model had consistent renaming because each world uses
+ * a distinct fresh name throughout.
+ *
+ * This Phase 3b artifact adds a SECOND SESSION for world L (same user →
+ * reuses ~xu1 in both sessions), which is precisely where the cross-session
+ * DDH constraint appears.  The Phase 3a result remains valid and is NOT
+ * contradicted by Phase 3b's analysis-incomplete outcome.
+ */
+
+builtins: diffie-hellman, asymmetric-encryption
+
+functions: v1anon/4, v2anon/4
+
+/* ------------------------------------------------------------------ */
+/* SB setup                                                            */
+/* ------------------------------------------------------------------ */
+rule Init_SB:
+  [ Fr(~ltkSB) ]
+  --[ InitSB($SB) ]->
+  [ !LtkSB($SB, ~ltkSB),
+    Out(pk(~ltkSB)) ]
+
+restriction UniqueInitSB:
+  "All sb #i #j. InitSB(sb) @ i & InitSB(sb) @ j ==> #i = #j"
+
+/* ------------------------------------------------------------------ */
+/* Key initialization — diff axis for the two worlds                  */
+/* ------------------------------------------------------------------ */
+/*
+ * ~xu1: long-term exponent for "user A" (used in both worlds for session 1)
+ * ~xu2: long-term exponent for "user B" (used in world R for session 2 only)
+ *
+ * !KeyS1(~xu1)              — session 1 key (identical in both worlds)
+ * !KeyS2(diff(~xu1, ~xu2))  — session 2 key:
+ *                              world L → ~xu1 (same user as session 1)
+ *                              world R → ~xu2 (different user)
+ *
+ * NO Out facts here: PKi_derived is NOT announced.
+ * Registration-time outputs are outside the unlinkability observation boundary.
+ */
+rule Init_Keys:
+  [ Fr(~xu1), Fr(~xu2) ]
+  --[ InitKeys() ]->
+  [ !KeyS1(~xu1),
+    !KeyS2(diff(~xu1, ~xu2)) ]
+
+restriction UniqueInitKeys:
+  "All #i #j. InitKeys() @ i & InitKeys() @ j ==> #i = #j"
+
+/* ------------------------------------------------------------------ */
+/* Session 1 — uses !KeyS1 (user A, both worlds)                      */
+/* ------------------------------------------------------------------ */
+rule Session1:
+  let Mi  = 'g'^~mIsec
+      MB  = 'g'^~mBsec
+      QB  = ('g'^xu1)^~mBsec
+      Ksh = Mi^~mBsec
+      Qi  = aenc(Mi, pk(~ltkSB))
+      V1  = v1anon(Mi, MB, Ksh, ~TS)
+  in
+  [ Fr(~mIsec), Fr(~mBsec), Fr(~TS),
+    !KeyS1(xu1),
+    !LtkSB($SB, ~ltkSB) ]
+  --[ S1($SB, QB) ]->
+  [ Out(<Qi, V1, ~TS, QB>) ]
+
+/* ------------------------------------------------------------------ */
+/* Session 2 — uses !KeyS2 (diff term: world L=user A, world R=user B) */
+/* ------------------------------------------------------------------ */
+rule Session2:
+  let Mi  = 'g'^~mIsec
+      MB  = 'g'^~mBsec
+      QB  = ('g'^xu2)^~mBsec
+      Ksh = Mi^~mBsec
+      Qi  = aenc(Mi, pk(~ltkSB))
+      V1  = v1anon(Mi, MB, Ksh, ~TS)
+  in
+  [ Fr(~mIsec), Fr(~mBsec), Fr(~TS),
+    !KeyS2(xu2),
+    !LtkSB($SB, ~ltkSB) ]
+  --[ S2($SB, QB) ]->
+  [ Out(<Qi, V1, ~TS, QB>) ]
+
+/* ------------------------------------------------------------------ */
+/* Executability                                                       */
+/* ------------------------------------------------------------------ */
+lemma unlink_executability:
+  exists-trace
+  "Ex sb qb1 qb2 #t1 #t2.
+     S1(sb, qb1) @ t1 &
+     S2(sb, qb2) @ t2"
+
+end

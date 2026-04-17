@@ -1,0 +1,37 @@
+maude tool: 'maude'
+ checking version: 2.7.1. OK.
+ checking installation: OK.
+diffLemma
+[Theory ssin_cahake_privacy_unlinkability_diff] Theory loaded
+[Theory ssin_cahake_privacy_unlinkability_diff] Theory translated
+[Theory ssin_cahake_privacy_unlinkability_diff] Derivation checks started
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Theory ssin_cahake_privacy_unlinkability_diff] Derivation checks ended
+[Theory ssin_cahake_privacy_unlinkability_diff] Theory closed
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+[Saturating Sources] Step 1 (Max 5)
+[Saturating Sources] Done
+LHS: Multiset rewriting rules and restrictions: 6
+RHS: Multiset rewriting rules and restrictions: 6
+LHS: Multiset rewriting rules and restrictions [Diff]: 6
+RHS: Multiset rewriting rules and restrictions [Diff]: 6
+LHS: Raw sources: 12 cases, deconstructions complete
+RHS: Raw sources: 12 cases, deconstructions complete
+LHS: Raw sources [Diff]: 12 cases, deconstructions complete
+RHS: Raw sources [Diff]: 12 cases, deconstructions complete
+LHS: Refined sources: 12 cases, deconstructions complete
+RHS: Refined sources: 12 cases, deconstructions complete
+LHS: Refined sources [Diff]: 12 cases, deconstructions complete
+RHS: Refined sources [Diff]: 12 cases, deconstructions complete

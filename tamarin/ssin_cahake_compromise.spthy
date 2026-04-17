@@ -1,0 +1,845 @@
+theory ssin_cahake_compromise
+begin
+
+/*
+ * Priority-2 compromise-aware symbolic model for the instantiated SSIN-Cahake
+ * core handshake.
+ *
+ * Scope
+ * -----
+ *   Section VI-C Pre-Authentication and Section VI-D Mutual Authentication and
+ *   Key Exchange of cakake-2nd.pdf.
+ *   Compromise-game semantics aligned with Section VII of the paper.
+ *
+ * Purpose
+ * -------
+ *   The baseline ssin_cahake_core.spthy proves trace properties in the absence
+ *   of all compromise.  This model extends it by adding long-term-key (LT) and
+ *   ephemeral-key (EP) compromise oracles, enabling symbolic lemmas that serve
+ *   as trace-level analogues of Theorem 3 (KCI-Resilient Explicit Authentication)
+ *   and Theorem 4 (KCI-Resilient AKE Secrecy) from Section VII.
+ *
+ * Extensions over the baseline
+ * ----------------------------
+ *   1. !EphUEi($UEi, ~mIsec) — persistent copy of UEi's ephemeral secret,
+ *      enabling Compromise_EP_UEi without consuming the protocol-state fact.
+ *   2. !EphSB($SB, ~mBsec)   — persistent copy of SB's ephemeral secret.
+ *   3. Compromise_LT          — outputs a party's long-term key; records CorruptLT.
+ *   4. Compromise_EP_UEi      — outputs ~mIsec; records CorruptEP(UEi, mIsec).
+ *   5. Compromise_EP_SB       — outputs ~mBsec; records CorruptEP(SB, mBsec).
+ *
+ * Protocol rules are structurally identical to the baseline; only the two
+ * pre-auth rules gain a persistent-ephemeral output fact.
+ *
+ * Modeling assumptions (all baseline disclosures carry over)
+ * ----------------------------------------------------------
+ *   • CheckTS4/5/6 are instrumentation annotations only; no restriction enforced.
+ *   • UEi is assumed to know SB's domain label DB and public key pkSB before
+ *     the protocol starts.
+ *   • CacheUEi is a passive trace annotation only.
+ *   • AEAD-protected tunnels (N1–N4) are idealized as confidential / authentic
+ *     linear-fact relay steps; the adversary cannot see or inject tunnel contents.
+ *   • There is no explicit Reveal(P, sid) session-key oracle.  Secrecy lemmas use
+ *     "not K(SKiB)" directly, which is conservative: it removes the oracle rather
+ *     than conditioning on "Reveal not called on this session."
+ *   • The EP freshness guards used in the secrecy lemmas are global across all
+ *     sessions of a party (conservative multi-session approximation; see below).
+ *
+ * Freshness / cleanliness encoding vs. Section VII (cakake-2nd.pdf)
+ * -------------------------------------------------------------------
+ *   Paper conditions (Theorem 3 / Theorem 4, §VII):
+ *     Freshness: session key unrevealed; intended peer (SB) not corrupted
+ *       before acceptance; StateReveal not queried on the tested UEi instance
+ *       or its intended SB partner.
+ *     Cleanliness: StateReveal not queried on the instance or its partner.
+ *   Symbolic model (this file):
+ *     The secrecy lemmas require that NEITHER endpoint's ephemeral secret is
+ *     compromised (via CorruptEP) at any time (global guard, no c < i).
+ *     The KCI-EA lemmas require that NEITHER endpoint's EP is compromised
+ *     before acceptance (c < i guard).
+ *     Both guards are party-level, not session-scoped: they exclude EP leakage
+ *     for any session of a named party, not specifically the tested instance
+ *     and intended partner.  This is a conservative over-approximation; see
+ *     "What these lemmas do NOT establish" below.
+ *   Algebraic necessity:
+ *     In the symbolic DH model, knowing either ephemeral alone (mIsec or mBsec)
+ *     is sufficient to reconstruct Kshared = Mi^mBsec = MB^mIsec from the other
+ *     party's public ephemeral on the channel.  Both EPs must therefore be
+ *     excluded in the secrecy guards to maintain soundness.
+ *   The long-term-key oracle (CorruptLT) is unrestricted in the secrecy lemmas:
+ *     both ltkUEi and ltkSB may be corrupted at any time.  This provides symbolic
+ *     PFS-style coverage: even after full LT compromise, the session key remains
+ *     secret provided neither ephemeral was revealed.
+ *
+ * KCI-EA cleanliness encoding vs. Section VII (cakake-2nd.pdf)
+ * -------------------------------------------------------------
+ *   Paper (Section VII, Cleanliness):
+ *     "A session is clean if the adversary has not queried StateReveal on the
+ *      instance or its partner."
+ *   Symbolic approximation: CorruptEP(UEi) / CorruptEP(SB) with c < i guard.
+ *   Party-level gap: these facts are keyed by party identity, not session id.
+ *     Excluding CorruptEP for a named party before i excludes it for ALL sessions
+ *     of that party, not just the tested instance and its partner.  This is
+ *     strictly stronger than the paper's per-instance cleanliness condition.
+ *
+ *   For kci_ea_sb_kci_proper (SB accepting, CorruptLT(SB) allowed):
+ *     With ltkSB corrupted, the adversary CAN compute Mi = adec(Qi, ltkSB) from
+ *     the public-channel ciphertext Qi = aenc(Mi, pkSB).  Mi itself is NOT hidden.
+ *     The DH binder Kshared = Mi^mBsec closes the forgery attack: even knowing Mi,
+ *     the adversary cannot compute Kshared without mBsec (CDH), and mBsec is
+ *     excluded by the CorruptEP(SB) cleanliness guard.
+ *   For kci_ea_uei_kci_proper (UEi accepting, CorruptLT(UEi) allowed):
+ *     With ltkUEi corrupted, the adversary CAN compute MB = adec(QB, ltkUEi).
+ *     MB itself is NOT hidden.  The DH binder Kshared = MB^mIsec closes the attack:
+ *     the adversary cannot compute Kshared without mIsec (CDH), and mIsec is
+ *     excluded by the CorruptEP(UEi) cleanliness guard.
+ *
+ * What these lemmas do NOT establish
+ * ------------------------------------
+ *   • Quantitative probability bounds from Theorems 3 and 4.  Those are
+ *     computational results (Adv_AEAD + Qimp/q + birthday terms).
+ *   • Full partnered-instance conditions with session identifiers (paper's EA def).
+ *     The KCI-EA lemmas conclude only prior honest-send evidence, not the unique
+ *     partnered-acceptance uniqueness the paper's EA definition requires.
+ *   • Session-scoped StateReveal / Reveal / Test oracle semantics.  The EP
+ *     compromise facts are keyed by party identity, not session id.  The guards
+ *     therefore exclude EP leakage across ALL sessions of a party, not just the
+ *     tested instance and its named partner.
+ *   • Coverage of Section VI-E batch verification or Theorem 5.
+ *   • Anonymity or unlinkability (see ssin_cahake_privacy_equiv.spthy).
+ */
+
+builtins: diffie-hellman, asymmetric-encryption
+
+functions:
+  hid/3,
+  pid_user/2,
+  pid_sa/2,
+  pid_sb/2,
+  v1tag/6,
+  v2tag/6,
+  skdf/7
+
+/* =========================================================================
+   Long-term-key and identity initialisation  (abstracts VI-A / VI-B)
+   ========================================================================= */
+
+rule InitEntity:
+  [ Fr(~ltk) ]
+  --[ InitEntity($A, $D) ]->
+  [ !Ltk($A, ~ltk),
+    !Pk($A, pk(~ltk)),
+    !Hi($A, $D, hid($A, $D, pk(~ltk))),
+    Out(<$A, $D, pk(~ltk), hid($A, $D, pk(~ltk))>) ]
+
+/* =========================================================================
+   Compromise oracles
+   =========================================================================
+   Correspond to Section VII interfaces:
+     Corrupt(P)         →  Compromise_LT     (outputs long-term key)
+     StateReveal(UEi,·) →  Compromise_EP_UEi (outputs UEi's ephemeral mIsec)
+     StateReveal(SB,·)  →  Compromise_EP_SB  (outputs SB's ephemeral mBsec)
+
+   There is no explicit Reveal(P, sid) oracle.  Secrecy claims use not K(SKiB).
+   ========================================================================= */
+
+rule Compromise_LT:
+  [ !Ltk($A, ltk) ]
+  --[ CorruptLT($A) ]->
+  [ Out(ltk) ]
+
+rule Compromise_EP_UEi:
+  [ !EphUEi($UEi, mIsec) ]
+  --[ CorruptEP($UEi, mIsec) ]->
+  [ Out(mIsec) ]
+
+rule Compromise_EP_SB:
+  [ !EphSB($SB, mBsec) ]
+  --[ CorruptEP($SB, mBsec) ]->
+  [ Out(mBsec) ]
+
+/* =========================================================================
+   Section VI-C — Pre-Authentication (idealized AEAD tunnels)
+   =========================================================================
+   Modified from baseline: UEi_PreAuth_1 and SB_PreAuth_3 additionally output
+   persistent !EphUEi and !EphSB facts to enable the EP compromise oracles.
+   All other rules are structurally identical to ssin_cahake_core.spthy.
+   ========================================================================= */
+
+rule UEi_PreAuth_1:
+  let Mi = 'g'^~mIsec
+      hi = hid($UEi, $Di, pkUEi)
+      PIDi = pid_user($UEi, Mi)
+  in
+  [ Fr(~mIsec),
+    Fr(~TS1),
+    !Ltk($UEi, ltkUEi),
+    !Pk($UEi, pkUEi),
+    !Pk($SB, pkSB),
+    !Hi($UEi, $Di, hi) ]
+  --[ Neq($UEi, $SB),
+      Neq($UEi, 'SA'),
+      Neq($SB, 'SA'),
+      SentN1($UEi, 'SA', hi, Mi, PIDi, ~TS1) ]->
+  [ !EphUEi($UEi, ~mIsec),
+    StUEi_PreAuth($UEi, $Di, $SB, $DB, ltkUEi, pkSB, hi, ~mIsec, Mi),
+    SA_InN1($UEi, $Di, $SB, $DB, hi, Mi, PIDi, ~TS1) ]
+
+rule SA_PreAuth_2:
+  let PIDA = pid_sa('SA', Mi)
+  in
+  [ Fr(~TS2),
+    SA_InN1(UEi, Di, SB, DB, hi, Mi, PIDi, TS1) ]
+  --[ SentN2('SA', SB, hi, Mi, PIDA, PIDi, ~TS2) ]->
+  [ SB_InN2(UEi, Di, SB, DB, hi, Mi, PIDA, PIDi, ~TS2) ]
+
+rule SB_PreAuth_3:
+  let MB = 'g'^~mBsec
+      hB = hid($SB, $DB, pkSB)
+      PIDB = pid_sb($SB, MB)
+  in
+  [ Fr(~mBsec),
+    Fr(~TS3),
+    !Ltk($SB, ltkSB),
+    !Pk($SB, pkSB),
+    !Pk($UEi, pkUEi),
+    !Hi($SB, $DB, hB),
+    SB_InN2($UEi, $Di, $SB, $DB, hi, Mi, PIDA, PIDi, TS2) ]
+  --[ SentN3($SB, 'SA', hB, MB, PIDA, PIDB, ~TS3) ]->
+  [ !EphSB($SB, ~mBsec),
+    StSB_Public($SB, $DB, $UEi, $Di, ltkSB, pkUEi, hi, hB, Mi, ~mBsec, MB),
+    SA_InN3($UEi, $Di, $SB, $DB, hB, MB, PIDA, PIDB, ~TS3) ]
+
+rule SA_PreAuth_4:
+  [ Fr(~TS4),
+    SA_InN3(UEi, Di, SB, DB, hB, MB, PIDA, PIDB, TS3) ]
+  --[ SentN4('SA', UEi, hB, MB, PIDA, PIDB, ~TS4) ]->
+  [ UEi_InN4(UEi, Di, SB, DB, hB, MB, PIDA, PIDB, ~TS4) ]
+
+/* =========================================================================
+   Section VI-D — Public Authentication and Key Exchange
+   ========================================================================= */
+
+rule UEi_Public_Send:
+  let Qi = aenc(Mi, pkSB)
+      Kshared = MB^mIsec
+      V1 = v1tag($UEi, $SB, Mi, MB, Kshared, ~TS5)
+  in
+  [ Fr(~TS5),
+    StUEi_PreAuth($UEi, $Di, $SB, $DB, ltkUEi, pkSB, hi, mIsec, Mi),
+    UEi_InN4($UEi, $Di, $SB, $DB, hB, MB, PIDA, PIDB, TS4) ]
+  --[ CheckTS4($UEi, $SB, TS4),
+      FreshTS5(~TS5),
+      SentPublic1($UEi, $SB, Qi, V1, ~TS5),
+      CacheUEi($UEi, $SB, hi, hB, Mi, MB) ]->
+  [ StUEi_Public($UEi, $Di, $SB, $DB, ltkUEi, mIsec, hi, hB, Mi, MB, Qi, V1, ~TS5),
+    Out(<$UEi, $SB, Qi, V1, ~TS5>) ]
+
+rule SB_Public_Recv_Send:
+  let MiCheck = adec(Qi, ltkSB)
+      QB = aenc(MB, pkUEi)
+      Kshared = Mi^mBsec
+      V2 = v2tag(UEi, SB, Mi, MB, Kshared, ~TS6)
+      SKiB = skdf(Kshared, UEi, Di, SB, DB, TS5, ~TS6)
+  in
+  [ Fr(~TS6),
+    StSB_Public(SB, DB, UEi, Di, ltkSB, pkUEi, hi, hB, Mi, mBsec, MB),
+    In(<UEi, SB, Qi, V1, TS5>) ]
+  --[ Eq(MiCheck, Mi),
+      Eq(V1, v1tag(UEi, SB, Mi, MB, Kshared, TS5)),
+      CheckTS5(SB, UEi, TS5),
+      VerifiedV1AtSB(SB, UEi, Qi, V1, TS5),
+      FreshTS6(~TS6),
+      SentPublic2(SB, UEi, QB, V2, ~TS6),
+      DeriveSB(SB, UEi, Kshared, SKiB),
+      AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, ~TS6) ]->
+  [ Out(<SB, UEi, QB, V2, ~TS6>) ]
+
+rule UEi_Public_Recv_Accept:
+  let MBCheck = adec(QB, ltkUEi)
+      Kshared = MB^mIsec
+      SKiB = skdf(Kshared, UEi, Di, SB, DB, TS5, TS6)
+  in
+  [ StUEi_Public(UEi, Di, SB, DB, ltkUEi, mIsec, hi, hB, Mi, MB, Qi, V1, TS5),
+    In(<SB, UEi, QB, V2, TS6>) ]
+  --[ Eq(MBCheck, MB),
+      Eq(V2, v2tag(UEi, SB, Mi, MB, Kshared, TS6)),
+      CheckTS6(UEi, SB, TS6),
+      VerifiedV2AtUEi(UEi, SB, QB, V2, TS6),
+      DeriveUEi(UEi, SB, Kshared, SKiB),
+      AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) ]->
+  [ ]
+
+/* =========================================================================
+   Restrictions (identical to baseline)
+   ========================================================================= */
+
+restriction Equality:
+  "All x y #i. Eq(x, y) @ i ==> x = y"
+
+restriction Inequality:
+  "All x #i. Neq(x, x) @ i ==> F"
+
+restriction UniqueInit:
+  "All A D1 D2 #i #j. InitEntity(A, D1) @ i & InitEntity(A, D2) @ j ==> #i = #j & D1 = D2"
+
+/* =========================================================================
+   Sanity checks
+   ========================================================================= */
+
+/*
+ * executability_kci
+ * -----------------
+ * Honest execution exists in the compromise model (basic sanity check).
+ */
+lemma executability_kci:
+  exists-trace
+  "Ex UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j.
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ j"
+
+/*
+ * executability_with_lt_corrupt
+ * ------------------------------
+ * Honest execution coexists with long-term-key corruption (KCI sanity check).
+ * SB's long-term key is corrupted; both parties still complete the protocol.
+ * This documents that the model does not trivially fail under KCI conditions.
+ * (SB-side corruption — outside Theorem 3/4 scope; retained as sanity check.)
+ */
+lemma executability_with_lt_corrupt:
+  exists-trace
+  "Ex UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j #c.
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ j &
+     CorruptLT(SB) @ c"
+
+/*
+ * executability_with_uei_lt_corrupt
+ * -----------------------------------
+ * Sanity check: a trace exists in which both parties accept AND UEi's long-term
+ * key is corrupted BEFORE UEi's acceptance event.
+ *
+ * This witnesses the revised KCI timing: Corrupt(UEi) fires before the tested
+ * acceptance (c < j), which is the relevant ordering for the KCI scenario in
+ * Theorems 3 and 4 (§VII G0: "A is permitted a single Corrupt query to simulate
+ * a KCI attack").  An unconstrained c would also cover post-acceptance corruption,
+ * which is not the scenario the theorems address.
+ */
+lemma executability_with_uei_lt_corrupt:
+  exists-trace
+  "Ex UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j #c.
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ j &
+     CorruptLT(UEi) @ c & c < j"
+
+/* =========================================================================
+   Replay resistance (hold unconditionally; identical logic to baseline)
+   ========================================================================= */
+
+lemma no_replay_sb_accept_core:
+  "All SB UEi SKiB Mi MB Qi QB TS5 TS6 #i #j.
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ j
+     ==> #i = #j"
+
+lemma no_replay_uei_accept_core:
+  "All UEi SB SKiB Mi MB Qi QB TS5 TS6 #i #j.
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ j
+     ==> #i = #j"
+
+/* =========================================================================
+   Key consistency (holds unconditionally)
+   ========================================================================= */
+
+lemma no_inconsistent_acceptance_core:
+  "All UEi SB SK1 SK2 Mi MB Qi QB TS5 TS6 #i #j.
+     AcceptUEi(UEi, SB, SK1, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     AcceptSB(SB, UEi, SK2, Mi, MB, Qi, QB, TS5, TS6) @ j
+     ==> SK1 = SK2"
+
+/* =========================================================================
+   KCI-Resilient Explicit Authentication
+   =========================================================================
+
+   *** MISMATCH NOTE — READ BEFORE CITING THESE LEMMAS ***
+   -------------------------------------------------------
+   The lemmas labeled kci_ea_*_FALSIFIED below are FALSIFIED by Tamarin.
+   The falsification reveals a real paper-to-model discrepancy that must be
+   reported before any reviewer-facing KCI-EA claim is made.
+
+   Attack trace (SB side, 7 steps) — OLD MODEL (v1tag/4, no DH binder):
+     1. UEi runs honest pre-auth; SB caches Mi = 'g'^~mIsec via idealized tunnel.
+     2. UEi sends public-phase message Out(UEi, SB, aenc(Mi, pkSB), v1tag(...), TS5).
+     3. Adversary suppresses delivery (controls In channel).
+     4. Adversary fires Compromise_LT(SB) → learns ltkSB.
+     5. Adversary computes Mi = adec(aenc(Mi, pkSB), ltkSB) from the public channel.
+     6. Adversary forges (Qi', V1', TS5') with Qi' = aenc(Mi, pk(ltkSB)),
+        V1' = v1tag(UEi, SB, Mi, TS5'), fresh TS5'.  [OLD v1tag/4 form — no binder]
+     7. Delivers forged message via In → SB_Public_Recv_Send fires →
+        AcceptSB(SB, UEi, ..., TS5') is recorded.
+     Result: AcceptSB occurred, UEi's CorruptEP was NOT called, yet
+             SentPublic1(UEi, SB, ..., TS5') was never fired by UEi.
+             Lemma conclusion fails.  Tamarin correctly reports FALSIFIED.
+     Note: this attack exploits the absence of the DH binder in the old v1tag/4
+     formula.  Step 6 can no longer succeed in the revised model because
+     v1tag/6 requires Kshared = Mi^mBsec, which CDH prevents forging without
+     mBsec (CorruptEP(SB)) or mIsec (CorruptEP(UEi)).
+     See kci_ea_sb_kci_proper for the corrected verified result.
+
+   Root cause:
+     Qi = aenc(Mi, pkSB) is a public-key encryption under SB's public key.
+     The asymmetric-encryption equational theory provides the destructor:
+       adec(aenc(x, pk(sk)), sk) = x
+     When the adversary has ltkSB (from Corrupt(SB) in the KCI setting),
+     they can compute Mi = adec(Qi, ltkSB) directly from any observed Qi
+     without needing StateReveal or CorruptEP(UEi).
+
+   Note on scope:
+     This attack is for the SB-ACCEPTING direction.  Theorem 3 (§VII) claims
+     only the UEi-ACCEPTING direction.  The old lemma kci_ea_sb_FALSIFIED
+     was therefore never in Theorem 3's scope and does not constitute a
+     counterexample to Theorem 3.
+
+     In Theorem 3's actual game (UEi-accepting), ltkSB IS excluded by the
+     freshness condition ("SB remains uncorrupted prior to acceptance").
+     The paper's G2 argument states: "without the long-term key of SB, or a
+     state-reveal query on the tested session, A cannot recover Mi."  This
+     is correct within Theorem 3's game — both ltkSB (freshness) and
+     StateReveal (cleanliness) are denied to A.  There is no discrepancy
+     between the paper's G2 argument and Theorem 3's scope.
+
+     The old symbolic model additionally lacked the DH binder (v1tag/4),
+     which allowed the SB-accepting attack even without StateReveal.  Under
+     the revised protocol (v1tag/6 with Kshared binder), the SB-accepting
+     attack is also closed (CDH); see kci_ea_sb_kci_proper.
+
+   Provable replacement lemmas:
+     kci_ea_sb_lt_clean and kci_ea_uei_lt_clean below provide the same
+     message-origin guarantee under the additional restriction that the
+     actor's own LT key was NOT corrupted before acceptance.  This is the
+     non-KCI case.  The labels are honest about the limitation.
+   ========================================================================= */
+
+/*
+ * kci_ea_sb_FALSIFIED  [do NOT include in proofs; kept for audit record]
+ * -----------------------------------------------------------------------
+ * This lemma is FALSIFIED.  See MISMATCH NOTE above.
+ * The attack trace shows AcceptSB can occur without SentPublic1 from UEi
+ * when Corrupt(SB) is used to reconstruct Mi from the public-channel Qi.
+ *
+ * Paper anchor: Section VII Theorem 3 (SB side) — gap identified.
+ */
+// lemma kci_ea_sb_FALSIFIED:  [INTENTIONALLY COMMENTED OUT]
+//   FALSIFIED under old v1tag/4 formula (without DH binder).
+//   Attack: Corrupt(SB) -> adec(Qi, ltkSB) = Mi -> forge v1tag(UEi, SB, Mi, TS5').
+//   Under the REVISED v1tag/6 formula (with DH binder), this attack is CLOSED.
+//   Replaced by kci_ea_sb_kci_proper below, which uses the correct v1tag/6 and verifies.
+//   Kept for audit record.
+//   "All SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+//      AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+//      not (Ex mIsec #c. CorruptEP(UEi, mIsec) @ c & c < i)
+//      ==>
+//      Ex Z #j. SentPublic1(UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z, TS5), TS5) @ j & j < i"
+
+/*
+ * kci_ea_uei_FALSIFIED  [do NOT include in proofs; kept for audit record]
+ * ------------------------------------------------------------------------
+ * This lemma is FALSIFIED.  See MISMATCH NOTE above.
+ * The attack trace shows AcceptUEi can occur without SentPublic2 from SB
+ * when the adversary uses both CorruptLT(SB) and CorruptLT(UEi) to compute
+ * Mi (from Qi + ltkSB) and MB (from QB + ltkUEi), then forges V2.
+ *
+ * Paper anchor: Section VII Theorem 3 (UEi side) — gap identified.
+ */
+// lemma kci_ea_uei_FALSIFIED:  [INTENTIONALLY COMMENTED OUT]
+//   FALSIFIED under old v2tag/5 formula (without DH binder).
+//   Attack: Corrupt(SB)+Corrupt(UEi) -> Mi from Qi, MB from QB -> forge v2tag(UEi,SB,Mi,MB,TS6).
+//   Under the REVISED v2tag/6 formula, forging V2 also requires the DH binder Kshared.
+//   With only CorruptLT(SB) and CorruptLT(UEi), the adversary cannot compute Kshared
+//   without mBsec or mIsec (CDH).  This attack route is therefore CLOSED under the revised model.
+//   Kept for audit record.
+//   "All UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+//      AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+//      not (Ex mBsec #c. CorruptEP(SB, mBsec) @ c & c < i)
+//      ==>
+//      Ex Z #j. SentPublic2(SB, UEi, QB, v2tag(UEi, SB, Mi, MB, Z, TS6), TS6) @ j & j < i"
+
+/* -------------------------------------------------------------------------
+   Provable replacement: non-KCI explicit authentication
+   -------------------------------------------------------------------------
+   These lemmas prove message-origin evidence under the restricted condition
+   that the actor's own LT key was NOT corrupted before acceptance.  This
+   is the non-KCI case; the full KCI case is blocked by the attack above.
+   The labels are intentionally qualified to reflect this limitation.
+   ------------------------------------------------------------------------- */
+
+/*
+ * kci_ea_sb_lt_clean
+ * -------------------
+ * If SB accepts AND UEi's EP was not compromised before acceptance AND SB's
+ * own LT was not corrupted before acceptance, then UEi genuinely sent the
+ * matching public-phase message.
+ *
+ * Limitation: this excludes the KCI scenario (SB's LT corrupted).
+ *   In the full KCI scenario, the attack above applies.
+ *
+ * Safe reviewer-facing wording:
+ *   "in the absence of SB's long-term-key corruption and UEi's ephemeral
+ *    compromise, SB acceptance implies a prior honest send from UEi
+ *    (non-injective trace-level)"
+ */
+lemma kci_ea_sb_lt_clean:
+  "All SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     not (Ex mIsec #c. CorruptEP(UEi, mIsec) @ c & c < i) &
+     not (Ex #c. CorruptLT(SB) @ c & c < i)
+     ==>
+     Ex Z #j. SentPublic1(UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z, TS5), TS5) @ j & j < i"
+
+/*
+ * kci_ea_uei_lt_clean
+ * --------------------
+ * If UEi accepts AND SB's EP was not compromised before acceptance AND UEi's
+ * own LT was not corrupted before acceptance, then SB genuinely sent the
+ * matching public-phase response.
+ *
+ * Limitation: excludes the KCI scenario (UEi's LT corrupted).
+ *
+ * Safe reviewer-facing wording:
+ *   "in the absence of UEi's long-term-key corruption and SB's ephemeral
+ *    compromise, UEi acceptance implies a prior honest send from SB
+ *    (non-injective trace-level)"
+ */
+lemma kci_ea_uei_lt_clean:
+  "All UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     not (Ex mBsec #c. CorruptEP(SB, mBsec) @ c & c < i) &
+     not (Ex #c. CorruptLT(UEi) @ c & c < i)
+     ==>
+     Ex Z #j. SentPublic2(SB, UEi, QB, v2tag(UEi, SB, Mi, MB, Z, TS6), TS6) @ j & j < i"
+
+/* =========================================================================
+   KCI-Resilient Explicit Authentication — correct directional guards
+   =========================================================================
+
+   The two _lt_clean lemmas above prove authentication only when the actor's
+   own LT key is uncorrupted — that is, the non-KCI case.
+
+   Under the revised protocol (v1tag/6, v2tag/6 with DH binder), both directions
+   have supplementary trace-level KCI-direction authentication proxy lemmas.
+   These are NOT proofs of Theorem 3 — see the individual lemma comments below.
+
+   In the KCI setting:
+   - The adversary may corrupt only the ACCEPTING party's long-term key.
+   - Session-specific random values (mIsec, mBsec) are NOT available to the
+     adversary unless the CorruptEP oracle is explicitly called.
+   - Any proof branch that uses mIsec or mBsec must be excluded by the
+     cleanliness guards (not CorruptEP(...) @ c & c < i).
+
+   Guard design rationale:
+   - Accepting-party LT (CorruptLT(UEi) or CorruptLT(SB)):  NO guard — this
+     is the permitted KCI corruption.
+   - Peer LT (CorruptLT(SB) or CorruptLT(UEi)):             c < i guard —
+     paper §VII freshness: "intended peer not corrupted before acceptance."
+   - Both EPs (CorruptEP on either party):                   c < i guard —
+     paper §VII cleanliness: "StateReveal not queried on the instance or
+     its partner."  In symbolic DH, either ephemeral alone suffices to
+     compute Kshared, so both must be excluded before acceptance.
+
+   Why the revised model closes the old SB-accepting attack:
+   - Old model (v1tag/4): V1 = v1tag(UEi, SB, Mi, TS5') — no DH binder.
+     Corrupt(SB) → adec(Qi,ltkSB) = Mi → forge V1 with just Mi.  FALSIFIED.
+   - Revised model (v1tag/6): V1 = v1tag(UEi, SB, Mi, MB, Kshared, TS5).
+     Forging V1 requires Kshared = Mi^mBsec = MB^mIsec.  Without mBsec
+     (CorruptEP(SB) excluded) or mIsec (CorruptEP(UEi) excluded), CDH
+     prevents computing the DH binder.  VERIFIED (kci_ea_sb_kci_proper).
+   ========================================================================= */
+
+/*
+ * kci_ea_uei_kci_proper
+ * ----------------------
+ * Trace-level KCI-direction authentication — UEi-accepting.
+ *
+ * This is a trace-level proxy lemma approximating (but NOT identical to)
+ * Theorem 3 (§VII KCI-Resilient Explicit Authentication).  It covers the
+ * same guard conditions but differs from the theorem in two ways:
+ *
+ *   GAP 1 — Prior-send evidence, not partnered-instance uniqueness.
+ *     Conclusion: a prior SentPublic2 from SB.  The paper's EA definition
+ *     requires a unique partnered acceptance with session-identifier binding.
+ *     This lemma does not prove uniqueness or session-id consistency.
+ *
+ *   GAP 2 — Party-level EP guards, not session-scoped StateReveal.
+ *     The guards exclude CorruptEP for the named party across ALL sessions
+ *     (not just the tested UEi instance and its intended SB partner).
+ *     This is a conservative over-approximation of the paper's per-instance
+ *     cleanliness condition.
+ *
+ * Guard conditions (sourced from cakake-2nd.pdf §VII, approximated here):
+ *
+ *   1. Direction: UEi accepting, SB as intended peer.
+ *
+ *   2. Corrupt(UEi) ALLOWED (the single KCI Corrupt query, §VII G0):
+ *        → no CorruptLT(UEi) guard.
+ *        With ltkUEi, the adversary can compute MB = adec(QB, ltkUEi) from
+ *        the public channel.  MB alone is insufficient (CDH; mBsec excluded).
+ *
+ *   3. Corrupt(SB) NOT ALLOWED before acceptance (peer freshness, §VII):
+ *        → not (Ex #c. CorruptLT(SB) @ c & c < i)
+ *
+ *   4. NOT StateReveal(UEi) before acceptance (cleanliness, approximated):
+ *        → not (Ex mIsec #c. CorruptEP(UEi, mIsec) @ c & c < i)
+ *        Party-level, not session-scoped.
+ *
+ *   5. NOT StateReveal(SB) before acceptance (cleanliness, approximated):
+ *        → not (Ex mBsec #c. CorruptEP(SB, mBsec) @ c & c < i)
+ *        Party-level, not session-scoped.
+ *
+ * Why forgery fails (CDH argument):
+ *   A holds ltkUEi → recovers MB = adec(QB, ltkUEi).
+ *   To deliver (QB', V2', TS6') that triggers AcceptUEi, A must produce
+ *   V2' = v2tag(UEi, SB, Mi, MB', Kshared', TS6') where Kshared' = MB'^mIsec.
+ *   Without mIsec (guard 4) or mBsec (guard 5), computing Kshared from public
+ *   ephemerals is CDH-hard.
+ *
+ * Previously falsified guard variants and why they are outside scope:
+ *   • kci_ea_uei_FALSIFIED (old model): used Corrupt(SB) → violates freshness.
+ *   • First kci_ea_uei_kci_proper: used CorruptEP(UEi) → violates cleanliness.
+ *
+ * Safe wording:
+ *   "trace-level KCI-direction authentication, UEi-accepting: under the
+ *    revised corruption guards (CorruptLT(UEi) allowed; CorruptLT(SB) and
+ *    both EPs excluded before acceptance), UEi acceptance implies a prior
+ *    honest send from SB (non-injective, party-level EP approximation)"
+ */
+/*
+ * First version FALSIFIED (see log 09b_kci_ea_uei_kci_proper.log):
+ *   Attack trace (12 steps): Compromise_EP_UEi fires → adversary learns mIsec
+ *   → computes Mi = 'g'^mIsec → forges V2 = v2tag(UEi,SB,Mi,MB_fake,TS6_fake)
+ *   with a self-chosen MB_fake and fresh TS6_fake and QB_fake = aenc(MB_fake,pkUEi).
+ *   UEi accepts without any SentPublic2 from SB.
+ *   Root cause: Mi is protected by the pre-auth tunnel AND by mIsec being
+ *   secret.  StateReveal(UEi,·) (modeled here as CorruptEP(UEi,mIsec)) directly
+ *   exposes mIsec and hence Mi.  The original guard excluded only SB's EP.
+ *
+ * Corrected guard (paper's cleanliness condition, Section VII):
+ *   StateReveal must not be called on EITHER party's instance.
+ *   Symbolically: neither CorruptEP(UEi) nor CorruptEP(SB) before acceptance.
+ *   CorruptLT(UEi) (the KCI scenario) remains freely allowed.
+ *   CorruptLT(SB) (the peer's LT) must be excluded (paper's freshness:
+ *     "intended peer not corrupted prior to acceptance").
+ */
+lemma kci_ea_uei_kci_proper:
+  "All UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     not (Ex mIsec #c. CorruptEP(UEi, mIsec) @ c & c < i) &
+     not (Ex mBsec #c. CorruptEP(SB, mBsec) @ c & c < i) &
+     not (Ex #c. CorruptLT(SB) @ c & c < i)
+     ==>
+     Ex Z #j. SentPublic2(SB, UEi, QB, v2tag(UEi, SB, Mi, MB, Z, TS6), TS6) @ j & j < i"
+
+/*
+ * kci_ea_sb_kci_proper
+ * --------------------
+ * Trace-level KCI-direction authentication proxy — SB-accepting direction.
+ * Supplementary counterpart of kci_ea_uei_kci_proper; NOT a proof of Theorem 3.
+ *
+ * NEW in revised model: this lemma was FALSIFIED under the old v1tag/4
+ * formula (without DH binder).  Under the revised v1tag/6 formula, the
+ * DH binder Kshared = Mi^mBsec closes the attack.
+ *
+ * Direction: SB accepting, UEi as intended peer.
+ * KCI: Corrupt(SB) FREELY ALLOWED (SB's LT compromised — the KCI scenario
+ *      for the SB-accepting direction).
+ * NOT Corrupt(UEi) before acceptance: peer freshness (paper §VII freshness).
+ * Cleanliness: NOT StateReveal(SB) before i (not CorruptEP(SB)),
+ *              NOT StateReveal(UEi) before i (not CorruptEP(UEi)).
+ *
+ * Security argument (revised protocol):
+ *   Adversary has ltkSB -> can compute Mi = adec(Qi, ltkSB) from public Qi.
+ *   To forge V1 = v1tag(UEi, SB, Mi, MB, Kshared, TS5), adversary needs
+ *   Kshared = Mi^mBsec = g^(mIsec*mBsec).
+ *   Without mBsec (cleanliness: CorruptEP(SB) excluded) or mIsec (cleanliness:
+ *   CorruptEP(UEi) excluded), CDH prevents computing the DH binder.
+ *   Therefore SB acceptance implies a prior honest send from UEi.
+ *
+ * Contrast with old model: old V1 = v1tag(UEi, SB, Mi, TS5) contained no
+ *   DH binder; knowing Mi (from ltkSB + Qi) was sufficient to forge V1.
+ *   The DH binder closes this gap.
+ *
+ * What this lemma does NOT establish:
+ *   Not claimed in §VII Theorem 3 (which covers only the UEi-accepting
+ *   direction).  This is a supplementary Tamarin-verified result for the
+ *   symmetric direction under equivalent cleanliness/freshness conditions.
+ */
+lemma kci_ea_sb_kci_proper:
+  "All SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     not (Ex mBsec #c. CorruptEP(SB, mBsec) @ c & c < i) &
+     not (Ex mIsec #c. CorruptEP(UEi, mIsec) @ c & c < i) &
+     not (Ex #c. CorruptLT(UEi) @ c & c < i)
+     ==>
+     Ex Z #j. SentPublic1(UEi, SB, Qi, v1tag(UEi, SB, Mi, MB, Z, TS5), TS5) @ j & j < i"
+
+/* =========================================================================
+   KCI-Resilient AKE Secrecy / PFS-style Claims
+   =========================================================================
+   Trace-level symbolic analogues of Theorem 4 (Section VII).
+
+   Theorem 4 paper statement:
+     "The adversary's AKE secrecy advantage is bounded by
+      Adv_AEAD + qH3/q + C(Qpre_B,2)/q + C(Qpre_i,2)/q."
+
+   What the symbolic lemmas establish:
+     Session-key secrecy conditioned on both ephemerals remaining uncompromised.
+     Long-term keys (ltkSB, ltkUEi) may be corrupted at any time, including
+     before acceptance.  This corresponds to a symbolic PFS-style claim: even
+     after full LT compromise, SKiB is not learnable if neither ephemeral leaks.
+
+   Freshness encoding vs. cakake-2nd.pdf §VII:
+     PDF freshness (four individual conditions):
+       (1) session key unrevealed;
+       (2) StateReveal not queried on the test instance;
+       (3) StateReveal not queried on the intended partner;
+       (4) intended peer not corrupted before acceptance.
+     Symbolic model: requires NOT CorruptEP on either party at any time (global).
+     This is stricter than the paper's conditions because in the symbolic DH
+     model knowing either ephemeral alone reconstructs Kshared from the peer's
+     public ephemeral.  Both EPs must be globally excluded to remain sound.
+     EP guards are also party-level (not session-scoped); see module comment.
+
+   What is NOT claimed:
+     • The quantitative bounds in Theorem 4.
+     • Full equivalence with the paper's Reveal/Test AKE secrecy game.
+     • Session-scoped StateReveal or Reveal oracle semantics.
+   ========================================================================= */
+
+/*
+ * fresh_secrecy_sb_kci
+ * --------------------
+ * Symbolic PFS-style secrecy at SB.
+ *
+ * If SB accepts AND neither party's ephemeral is ever compromised, then SKiB is
+ * not known to the adversary, regardless of LT compromise.
+ *
+ * Kshared = Mi^mBsec.  With mBsec uncompromised, the adversary cannot compute
+ * this DH value even if it knows Mi (derived from ltkSB + Qi) and MB (derived
+ * from ltkUEi + QB).  The CDH assumption in Tamarin's DH equational theory
+ * prevents deriving g^(mIsec*mBsec) from g^mIsec and g^mBsec alone.
+ *
+ * Supplementary trace-level result.  Not anchored to Theorem 4 (which covers only
+ * the UEi-accepting direction).  This is the symmetric SB-accepting PFS-style
+ * analogue: LT corruption is unrestricted (no CorruptLT guard on either party);
+ * both EPs must be globally clean.  Not directly claimed in §VII.
+ */
+lemma fresh_secrecy_sb_kci:
+  "All SB UEi SKiB Mi MB Qi QB TS5 TS6 #i.
+     AcceptSB(SB, UEi, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     not (Ex mBsec #c. CorruptEP(SB, mBsec) @ c) &
+     not (Ex mIsec #c. CorruptEP(UEi, mIsec) @ c)
+     ==>
+     not (Ex #k. K(SKiB) @ k)"
+
+/*
+ * fresh_secrecy_uei_kci
+ * ---------------------
+ * Supplementary trace-level secrecy analogue at UEi — not theorem-exact.
+ *
+ * Symmetric supplementary trace-level proxy for the initiator side.
+ * LT compromise is unrestricted (both CorruptLT(UEi) and CorruptLT(SB) allowed
+ * at any time).  Note: Theorem 4 requires NOT CorruptLT(SB) before acceptance;
+ * this lemma imposes no such restriction, making it only a supplementary
+ * trace-level secrecy proxy and not theorem-exact.  No Reveal/Test oracle; party-level
+ * EP guards; no CorruptLT(SB) timing restriction.
+ *
+ * Kshared = MB^mIsec.  With mIsec uncompromised, the adversary cannot compute
+ * this DH value regardless of LT corruption (CDH argument).
+ *
+ * See §Encoding gaps note in ssin_claims_map.md for the party-level EP approximation
+ * and why global EP exclusion is necessary in the symbolic DH model.
+ */
+lemma fresh_secrecy_uei_kci:
+  "All UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     not (Ex mIsec #c. CorruptEP(UEi, mIsec) @ c) &
+     not (Ex mBsec #c. CorruptEP(SB, mBsec) @ c)
+     ==>
+     not (Ex #k. K(SKiB) @ k)"
+
+/* =========================================================================
+   Trace-level secrecy analogue — Theorem 4-adjacent guard conditions
+   =========================================================================
+   This lemma is a trace-level proxy lemma with guard conditions that approximate
+   (but are NOT identical to) Section VII Theorem 4.  It narrows fresh_secrecy_uei_kci
+   by adding NOT CorruptLT(SB) before acceptance, matching the paper's "intended
+   peer not corrupted before acceptance" freshness condition.
+
+   Gaps relative to Theorem 4:
+     GAP 1 — No Reveal / Test oracle semantics.
+       The model has no Reveal(P,sid) or Test(sid) oracle (see module comment,
+       line 42).  "not K(SKiB)" is used directly instead of conditioning on
+       "Reveal not queried on this session."  This is conservative but does not
+       replicate the paper's Test-query AKE secrecy game.
+     GAP 2 — Party-level EP guards, not session-scoped StateReveal.
+       Same party-level over-approximation as kci_ea_uei_kci_proper (see above).
+
+   EP guard timing note (global vs. c < i):
+     For the EA lemmas, c < i is appropriate (forgery requires knowledge before
+     the forged message is accepted).  For secrecy (not K(SKiB) globally), the
+     EP guard must be global: post-acceptance exposure of mIsec lets the adversary
+     compute Kshared = MB^mIsec from the public channel at any future time-point.
+
+   Relationship to fresh_secrecy_uei_kci:
+     This lemma adds NOT CorruptLT(SB) before i; its preconditions are strictly
+     more restrictive, so it is implied by the already-verified
+     fresh_secrecy_uei_kci.  Retained for a directly citable restricted result.
+   ========================================================================= */
+
+/*
+ * kci_ake_secrecy_uei_t4
+ * -----------------------
+ * Trace-level KCI-direction secrecy — UEi-accepting, Theorem 4-adjacent guards.
+ *
+ * This is a trace-level proxy, NOT a proof of Theorem 4 (§VII).
+ * See gaps listed in the section header above.
+ *
+ * Guard conditions (sourced from cakake-2nd.pdf §VII, approximated here):
+ *
+ *   1. Direction: UEi accepting, SB as intended peer.
+ *
+ *   2. Corrupt(UEi) ALLOWED (KCI scenario):
+ *        → no CorruptLT(UEi) guard.
+ *        A can recover MB = adec(QB, ltkUEi) from the public channel.
+ *
+ *   3. NOT Corrupt(SB) before acceptance (peer freshness):
+ *        → not (Ex #c. CorruptLT(SB) @ c & c < i)
+ *
+ *   4. NOT StateReveal(UEi) at any time (cleanliness, global, approximated):
+ *        → not (Ex mIsec #c. CorruptEP(UEi, mIsec) @ c)
+ *
+ *   5. NOT StateReveal(SB) at any time (cleanliness, global, approximated):
+ *        → not (Ex mBsec #c. CorruptEP(SB, mBsec) @ c)
+ *
+ * Why secrecy holds (CDH argument):
+ *   A holds ltkUEi → recovers MB = adec(QB, ltkUEi).
+ *   Kshared = MB^mIsec.  Without mIsec (guard 4), CDH prevents derivation.
+ *   If CorruptLT(SB) fires after acceptance (allowed), A also recovers
+ *   Mi = adec(Qi, ltkSB); then Kshared = Mi^mBsec, but mBsec excluded (guard 5).
+ *
+ * Safe wording:
+ *   "trace-level KCI-direction secrecy, UEi-accepting: under Theorem 4-adjacent
+ *    corruption guards (CorruptLT(UEi) allowed; CorruptLT(SB) excluded before
+ *    acceptance; both EPs globally uncompromised), the session key is not
+ *    derivable by the adversary (no Reveal/Test oracle; party-level EP guards)"
+ */
+lemma kci_ake_secrecy_uei_t4:
+  "All UEi SB SKiB Mi MB Qi QB TS5 TS6 #i.
+     AcceptUEi(UEi, SB, SKiB, Mi, MB, Qi, QB, TS5, TS6) @ i &
+     not (Ex mIsec #c. CorruptEP(UEi, mIsec) @ c) &
+     not (Ex mBsec #c. CorruptEP(SB, mBsec) @ c) &
+     not (Ex #c. CorruptLT(SB) @ c & c < i)
+     ==>
+     not (Ex #k. K(SKiB) @ k)"
+
+end
